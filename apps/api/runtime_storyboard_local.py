@@ -17,7 +17,7 @@ from apps.api.runtime_storyboard_planning import storyboard_plan_fields
 
 
 ASSET_RE = re.compile(r"@([A-Za-z0-9_\-\u4e00-\u9fff·]+)")
-SCENE_HINTS = ("主要场景", "场景", "办公室", "房间", "街道", "屋顶", "楼顶", "天台", "城市", "天际线", "森林", "海边", "山谷", "山巅", "山脊", "石台", "战场", "云海", "云栈洞口", "洞口", "洞内", "山洞", "餐厅", "车内", "走廊", "宫殿", "庭院", "广场", "屏幕")
+SCENE_HINTS = ("主要场景", "场景", "办公室", "房间", "街道", "巷口", "窄巷", "巷子", "青石台阶", "青砖", "屋顶", "楼顶", "天台", "城市", "天际线", "森林", "海边", "山谷", "山巅", "山脊", "石台", "战场", "云海", "云栈洞口", "洞口", "洞内", "山洞", "餐厅", "车内", "走廊", "宫殿", "庭院", "广场", "屏幕")
 KNOWN_CHARACTER_NAMES = ("唐僧", "白骨精", "孙悟空", "猪八戒", "沙僧", "金刚狼", "林晚")
 CHARACTER_HINTS = ("主角", "角色", "人物", "女孩", "女生", "男孩", "女人", "男人", "老人", "孩子", "机器人", "队长", "老师", "学生", "皇帝", "侦探", *KNOWN_CHARACTER_NAMES)
 PROP_HINTS = ("金箍棒", "手机", "电脑", "键盘", "刀", "剑", "棍", "棒", "车辆", "汽车", "信件", "信封", "信纸", "照片", "路灯", "台灯", "灯具", "灯柱", "书", "门", "地图")
@@ -354,15 +354,23 @@ def _infer_scene_label(text: str) -> str:
         return "办公室"
     if re.search(r"房间|室内", source):
         return "室内空间"
+    if re.search(r"老城区巷口|巷口|窄巷|巷子|青石台阶|青砖", source):
+        return "老城区巷口" if re.search(r"老城区|巷口", source) else "巷道空间"
     if re.search(r"街道|街区|路面", source):
         return "街道空间"
     if re.search(r"海边|海面|沙滩|灯塔", source):
         return "海边"
     if "餐厅" in source:
         return "餐厅"
-    if re.search(r"山巅|山脊|石台|云海|战场", source):
+    if _looks_like_mountain_battle_scene(source):
         return "山巅石台战场"
     return ""
+
+
+def _looks_like_mountain_battle_scene(source: str) -> bool:
+    if re.search(r"山巅|山脊|云海|战场", source):
+        return True
+    return bool("石台" in source and re.search(r"山|峰|云|战|大战|对决|破碎", source))
 
 
 def _repeated_actor_names(source: str) -> list[str]:

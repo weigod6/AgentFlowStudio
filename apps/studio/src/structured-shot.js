@@ -1,7 +1,7 @@
 import { normalizeAssetExtractionRefs } from "./asset-extraction-contract.js";
 
 const ASSET_RE = /@([A-Za-z0-9_\-\u4e00-\u9fff·]+)/g;
-const SCENE_HINTS = ["主要场景", "场景", "办公室", "房间", "街道", "屋顶", "楼顶", "天台", "城市", "天际线", "森林", "海边", "山谷", "山巅", "山脊", "石台", "战场", "云海", "云栈洞口", "洞口", "洞内", "山洞", "餐厅", "车内", "走廊", "宫殿", "庭院", "广场", "屏幕"];
+const SCENE_HINTS = ["主要场景", "场景", "办公室", "房间", "街道", "巷口", "窄巷", "巷子", "青石台阶", "青砖", "屋顶", "楼顶", "天台", "城市", "天际线", "森林", "海边", "山谷", "山巅", "山脊", "石台", "战场", "云海", "云栈洞口", "洞口", "洞内", "山洞", "餐厅", "车内", "走廊", "宫殿", "庭院", "广场", "屏幕"];
 const KNOWN_CHARACTER_NAMES = ["唐僧", "白骨精", "孙悟空", "猪八戒", "沙僧", "金刚狼", "林晚"];
 const CHARACTER_HINTS = ["主角", "角色", "人物", "女孩", "男孩", "女人", "男人", "老人", "孩子", "机器人", "队长", "老师", "学生", ...KNOWN_CHARACTER_NAMES];
 const PROP_HINTS = ["金箍棒", "钢爪", "手机", "电脑", "键盘", "刀", "剑", "棍", "棒", "车辆", "汽车", "信件", "信封", "信纸", "照片", "路灯", "台灯", "灯具", "灯柱", "书", "门"];
@@ -296,8 +296,14 @@ function inferSceneLabel(text) {
   if (isRooftop) return "屋顶平台";
   if (isCity) return "城市场景";
   if (/云栈洞口|洞口|洞内|山洞/.test(source)) return source.includes("云栈") ? "云栈洞口" : "山洞场景";
-  if (/山巅|山脊|石台|云海|战场/.test(source)) return "山巅石台战场";
+  if (/老城区巷口|巷口|窄巷|巷子|青石台阶|青砖/.test(source)) return /老城区|巷口/.test(source) ? "老城区巷口" : "巷道空间";
+  if (looksLikeMountainBattleScene(source)) return "山巅石台战场";
   return "";
+}
+
+function looksLikeMountainBattleScene(source) {
+  if (/山巅|山脊|云海|战场/.test(source)) return true;
+  return source.includes("石台") && /山|峰|云|战|大战|对决|破碎/.test(source);
 }
 
 function inferDuration(text) {

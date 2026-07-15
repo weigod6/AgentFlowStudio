@@ -1196,6 +1196,30 @@ process.stdout.write(JSON.stringify({
     assert "根据分镜描述确定可复用外观辨识点" not in payload["text"]
 
 
+def test_frontend_structured_shot_does_not_treat_bluestone_steps_as_battlefield() -> None:
+    script = r'''
+import { structuredShotFromSegment, structuredShotText } from "./apps/studio/src/structured-shot.js";
+
+const shot = structuredShotFromSegment(
+  "片名：《猫捡到狗那天》小明蹲在老城区巷口的青石台阶上，指尖沾着猫粮碎屑，正给蜷在纸箱里的橘猫顺毛。夕阳斜切过窄巷高墙，在青砖地面投下细长影子。",
+  1,
+);
+process.stdout.write(JSON.stringify({ shot, text: structuredShotText(shot) }));
+'''
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    payload = json.loads(completed.stdout)
+    refs = {(item["label"], item["asset_type"]) for item in payload["shot"]["asset_refs"]}
+
+    assert "山巅石台战场" not in payload["text"]
+    assert ("老城区巷口", "scene") in refs
+
+
 def test_storyboard_asset_recognition_prioritizes_principal_characters_and_manual_props() -> None:
     script = r'''
 import { structuredShotFromSegment } from "./apps/studio/src/structured-shot.js";

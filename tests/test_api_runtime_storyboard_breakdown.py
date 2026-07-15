@@ -111,6 +111,29 @@ def test_storyboard_local_fallback_adds_source_grounding_and_asset_evidence() ->
     assert all(isinstance(ref["confidence"], float) for ref in first_refs)
 
 
+def test_storyboard_local_fallback_does_not_treat_bluestone_steps_as_battlefield() -> None:
+    script = (
+        "片名：《猫捡到狗那天》小明蹲在老城区巷口的青石台阶上，指尖沾着猫粮碎屑，"
+        "正给蜷在纸箱里的橘猫顺毛。夕阳斜切过窄巷高墙，在青砖地面投下细长影子。"
+    )
+
+    shots = local_storyboard_shots(script)
+    serialized = json.dumps(shots, ensure_ascii=False)
+    first_refs = {(ref["label"], ref["asset_type"]) for ref in shots[0]["asset_refs"]}
+
+    assert "山巅石台战场" not in serialized
+    assert ("老城区巷口", "scene") in first_refs
+
+
+def test_storyboard_local_fallback_still_recognizes_mountain_battlefield() -> None:
+    script = "孙悟空大战金刚狼，破碎山巅石台上云雾翻卷。孙悟空手持金箍棒向前压低身形。"
+
+    shots = local_storyboard_shots(script)
+    refs = {(ref["label"], ref["asset_type"]) for shot in shots for ref in shot["asset_refs"]}
+
+    assert ("山巅石台战场", "scene") in refs
+
+
 def test_storyboard_breakdown_returns_asset_graph_with_cross_shot_evidence(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("AFS_ALLOW_REMOTE_LLM", raising=False)
     client = TestClient(create_runtime_app(runtime_root=tmp_path))
@@ -769,6 +792,202 @@ def test_shot_asset_plan_keeps_human_and_animal_profiles_separate(tmp_path, monk
     assert cat["profile_plan"]["character_subtype"] == "animal"
     assert cat["profile_plan"]["facts"]["species"] == "猫"
     assert cat["profile_plan"]["facts"]["color_pattern"] == "橘色"
+
+
+def test_shot_asset_plan_uses_llm_asset_contract_for_animal_subtype(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AFS_ALLOW_REMOTE_LLM", "true")
+    calls: list[object] = []
+
+    class Descriptor:
+        modality = "llm"
+
+    class FakeRegistry:
+        _descriptors = {"prompt_optimizer": Descriptor()}
+
+        def dispatch(self, capability, service_id, request):
+            calls.append(request)
+            assert capability == "llm"
+            assert service_id == "prompt_optimizer"
+            assert "shot_asset_recognition_v1" in request.prompt
+            assert "不要把“青石台阶”里的“石台”联想成山巅石台战场" in request.prompt
+            evidence = "小明蹲在老城区巷口青石台阶上，指尖沾着猫粮碎屑，专注晃动旧毛线团；煤球蹲坐不动，尾巴尖微微翘起如问号，琥珀色瞳孔紧盯毛线末端。"
+            return {
+                "text": json.dumps(
+                    {
+                        "assets": [
+                            {
+                                "label": "小明",
+                                "asset_type": "character",
+                                "character_subtype": "human",
+                                "evidence_text": evidence,
+                                "facts": {"identity": "小明", "appearance_context": "蹲在老城区巷口青石台阶上"},
+                                "continuity_locks": ["保持小明人物身份"],
+                                "negative_locks": ["不要把小明改成动物"],
+                                "role_in_shot": "照看猫并晃动毛线团",
+                                "confidence": 0.94,
+                            },
+                            {
+                                "label": "煤球",
+                                "asset_type": "character",
+                                "character_subtype": "animal",
+                                "evidence_text": evidence,
+                                "facts": {
+                                    "species": "猫",
+                                    "current_action": ["蹲坐不动", "紧盯毛线末端"],
+                                    "distinctive_marks": ["尾巴尖微微翘起如问号", "琥珀色瞳孔"],
+                                },
+                                "continuity_locks": ["保持煤球猫的动物主体身份", "保持琥珀色瞳孔"],
+                                "negative_locks": ["不要把煤球改成人类角色"],
+                                "role_in_shot": "被小明逗玩的猫",
+                                "confidence": 0.96,
+                            },
+                            {
+                                "label": "老城区巷口",
+                                "asset_type": "scene",
+                                "character_subtype": "",
+                                "evidence_text": evidence,
+                                "facts": {
+                                    "location_type": "老城区巷口",
+                                    "spatial_structure": "青石台阶与巷口空间",
+                                    "key_environment_elements": ["青石台阶"],
+                                },
+                                "continuity_locks": ["保持老城区巷口空间结构"],
+                                "negative_locks": ["不要改成其他地点"],
+                                "role_in_shot": "主要场景",
+                                "confidence": 0.93,
+                            },
+                        ],
+                        "dropped_candidates": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                "provider_calls_started": True,
+            }
+
+    monkeypatch.setattr("apps.api.runtime_shot_asset_plan.load_provider_registry", lambda: FakeRegistry())
+    client = TestClient(create_runtime_app(runtime_root=tmp_path))
+    project_id = "proj_llm_asset_plan"
+    client.post("/projects", json={"project_id": project_id, "goal": "Asset profile plan"})
+
+    shot_text = (
+        "镜号：01\n"
+        "画面描述：@小明 @煤球 @老城区巷口。小明蹲在老城区巷口青石台阶上，指尖沾着猫粮碎屑，"
+        "专注晃动旧毛线团；煤球蹲坐不动，尾巴尖微微翘起如问号，琥珀色瞳孔紧盯毛线末端。\n"
+        "资产：@小明（角色）、@煤球（角色）、@老城区巷口（场景）"
+    )
+    response = client.post(
+        f"/projects/{project_id}/shot-asset-plans",
+        json={
+            "node_id": "shot_cat_alley_llm",
+            "shot": {
+                "shot_id": "S01",
+                "index": 1,
+                "description": shot_text,
+                "asset_refs": [
+                    {"label": "小明", "asset_type": "character", "status": "mentioned", "source": "explicit"},
+                    {"label": "煤球", "asset_type": "character", "status": "mentioned", "source": "explicit"},
+                    {"label": "老城区巷口", "asset_type": "scene", "status": "mentioned", "source": "explicit"},
+                ],
+            },
+            "script_text": shot_text,
+            "generated_at": "2026-07-15T22:15:00+08:00",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, ensure_ascii=False)
+    refs = payload["asset_refs"]
+    xiaoming = next(item for item in refs if item["label"] == "小明")
+    cat = next(item for item in refs if item["label"] == "煤球")
+    scene = next(item for item in refs if item["label"] == "老城区巷口")
+    graph_cat = next(item for item in payload["asset_graph"]["assets"] if item["label"] == "煤球")
+
+    assert len(calls) == 1
+    assert payload["safe_manifest"]["status"] == "provider_structured_asset_plan"
+    assert payload["safe_manifest"]["provider_calls_started"] is True
+    assert payload["safe_manifest"]["raw_provider_response_stored"] is False
+    assert xiaoming["profile_plan"]["character_subtype"] == "human"
+    assert cat["profile_plan"]["character_subtype"] == "animal"
+    assert cat["profile_plan"]["facts"]["species"] == "猫"
+    assert "保持煤球猫的动物主体身份" in cat["profile_plan"]["identity_locks"]
+    assert scene["asset_type"] == "scene"
+    assert graph_cat["character_subtype"] == "animal"
+    assert graph_cat["asset_fact_profile"]["facts"]["species"] == "猫"
+    assert "山巅石台战场" not in serialized
+    assert response_contains_unsafe_marker(payload) is False
+
+
+def test_shot_asset_plan_rejects_ungrounded_provider_assets(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AFS_ALLOW_REMOTE_LLM", "true")
+
+    class Descriptor:
+        modality = "llm"
+
+    class FakeRegistry:
+        _descriptors = {"prompt_optimizer": Descriptor()}
+
+        def dispatch(self, capability, service_id, request):
+            assert capability == "llm"
+            assert service_id == "prompt_optimizer"
+            return {
+                "text": json.dumps(
+                    {
+                        "assets": [
+                            {
+                                "label": "山巅石台战场",
+                                "asset_type": "scene",
+                                "evidence_text": "山巅石台战场上云海翻卷。",
+                                "facts": {"location_type": "山巅石台战场"},
+                                "confidence": 0.99,
+                            }
+                        ],
+                        "dropped_candidates": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                "provider_calls_started": True,
+            }
+
+    monkeypatch.setattr("apps.api.runtime_shot_asset_plan.load_provider_registry", lambda: FakeRegistry())
+    client = TestClient(create_runtime_app(runtime_root=tmp_path))
+    project_id = "proj_llm_asset_plan_rejects_hallucination"
+    client.post("/projects", json={"project_id": project_id, "goal": "Asset profile plan"})
+
+    shot_text = (
+        "镜号：01\n"
+        "画面描述：@小明 @煤球 @老城区巷口。小明蹲在老城区巷口青石台阶上，指尖沾着猫粮碎屑；"
+        "煤球蹲坐不动，尾巴尖微微翘起如问号。\n"
+        "资产：@小明（角色）、@煤球（角色）、@老城区巷口（场景）"
+    )
+    response = client.post(
+        f"/projects/{project_id}/shot-asset-plans",
+        json={
+            "node_id": "shot_cat_alley_rejects_hallucination",
+            "shot": {
+                "shot_id": "S01",
+                "index": 1,
+                "description": shot_text,
+                "asset_refs": [
+                    {"label": "小明", "asset_type": "character", "status": "mentioned", "source": "explicit"},
+                    {"label": "煤球", "asset_type": "character", "status": "mentioned", "source": "explicit"},
+                    {"label": "老城区巷口", "asset_type": "scene", "status": "mentioned", "source": "explicit"},
+                ],
+            },
+            "script_text": shot_text,
+            "generated_at": "2026-07-15T22:20:00+08:00",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, ensure_ascii=False)
+
+    assert payload["safe_manifest"]["status"] == "local_asset_plan"
+    assert payload["safe_manifest"]["provider_calls_started"] is True
+    assert payload["safe_manifest"]["discard_reason"] == "provider asset response has no grounded usable assets"
+    assert "山巅石台战场" not in serialized
+    assert ("老城区巷口", "scene") in {(item["label"], item["asset_type"]) for item in payload["asset_refs"]}
 
 
 def test_storyboard_plan_includes_professional_reference_for_rooftop_video() -> None:

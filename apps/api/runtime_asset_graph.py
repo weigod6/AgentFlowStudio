@@ -3,7 +3,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from agentflow.algorithms.asset_facts import build_asset_fact_profile
+from agentflow.algorithms.asset_facts import (
+    build_asset_fact_profile,
+    continuity_locks_from_facts,
+    negative_locks_from_facts,
+)
 
 
 ASSET_GRAPH_STAGE = "candidate_asset_graph"
@@ -125,12 +129,27 @@ def _new_asset_builder(ref: dict[str, Any]) -> dict[str, Any]:
         "confidences": [_confidence(ref.get("confidence"))],
         "shot_refs": [],
         "evidence_spans": [],
+        "character_subtypes": [],
+        "facts": [],
+        "fact_evidence": [],
+        "continuity_locks": [],
+        "negative_locks": [],
     }
 
 
 def _merge_ref(builder: dict[str, Any], ref: dict[str, Any], shot_id: str, source_span: dict[str, str]) -> None:
     if ref.get("asset_id") and not builder.get("asset_id"):
         builder["asset_id"] = str(ref.get("asset_id"))
+    subtype = _character_subtype_from_ref(ref)
+    if subtype:
+        builder["character_subtypes"].append(subtype)
+    facts = _dict_from_ref(ref, "facts")
+    if facts:
+        builder["facts"].append(facts)
+    builder["fact_evidence"].extend(_strings_from_ref(ref, "fact_evidence"))
+    builder["continuity_locks"].extend(_strings_from_ref(ref, "continuity_locks"))
+    builder["continuity_locks"].extend(_strings_from_ref(ref, "identity_locks"))
+    builder["negative_locks"].extend(_strings_from_ref(ref, "negative_locks"))
     builder["aliases"].add(str(ref["label"]))
     builder["statuses"].append(str(ref.get("status") or "candidate"))
     builder["sources"].append(str(ref.get("source") or "candidate"))
@@ -171,9 +190,42 @@ def _final_asset(builder: dict[str, Any], *, source_text: str = "") -> dict[str,
         evidence_text=evidence_text,
         source_text=source_text,
     )
-    character_subtype = str(fact_profile.get("character_subtype") or "")
+    facts = _merge_dicts(fact_profile.get("facts"), *builder.get("facts", []))
+    character_subtype = _preferred_subtype(builder.get("character_subtypes", [])) or str(fact_profile.get("character_subtype") or "")
+    computed_continuity = continuity_locks_from_facts(asset_type, str(builder["label"]), character_subtype, facts)
+    computed_negative = negative_locks_from_facts(asset_type, str(builder["label"]), character_subtype, facts)
     base_continuity = [] if character_subtype == "animal" else _continuity_locks(asset_type, builder["label"], evidence_text)
     base_negative = [] if character_subtype == "animal" else _negative_locks(asset_type, builder["label"], evidence_text)
+    fact_evidence = _dedupe(
+        [
+            *[str(item) for item in fact_profile.get("fact_evidence", []) if str(item).strip()],
+            *[str(item) for item in builder.get("fact_evidence", []) if str(item).strip()],
+        ]
+    )
+    continuity_locks = _dedupe(
+        [
+            *base_continuity,
+            *computed_continuity,
+            *[str(item) for item in fact_profile.get("continuity_locks", [])],
+            *[str(item) for item in builder.get("continuity_locks", [])],
+        ]
+    )
+    negative_locks = _dedupe(
+        [
+            *base_negative,
+            *computed_negative,
+            *[str(item) for item in fact_profile.get("negative_locks", [])],
+            *[str(item) for item in builder.get("negative_locks", [])],
+        ]
+    )
+    merged_fact_profile = {
+        **fact_profile,
+        "character_subtype": character_subtype,
+        "facts": facts,
+        "fact_evidence": fact_evidence,
+        "continuity_locks": continuity_locks,
+        "negative_locks": negative_locks,
+    }
     return {
         "graph_asset_id": builder["graph_asset_id"],
         "asset_id": builder.get("asset_id") or builder["graph_asset_id"],
@@ -195,12 +247,12 @@ def _final_asset(builder: dict[str, Any], *, source_text: str = "") -> dict[str,
         "modality_gate_status": "accepted",
         "name_source": (builder["name_sources"] or ["candidate"])[0],
         "provisional_name": bool(builder.get("provisional_name")),
-        "facts": fact_profile.get("facts") if isinstance(fact_profile.get("facts"), dict) else {},
-        "fact_evidence": fact_profile.get("fact_evidence") if isinstance(fact_profile.get("fact_evidence"), list) else [],
+        "facts": facts,
+        "fact_evidence": fact_evidence,
         "missing_fact_fields": fact_profile.get("missing_fact_fields") if isinstance(fact_profile.get("missing_fact_fields"), list) else [],
-        "asset_fact_profile": fact_profile,
-        "continuity_locks": _dedupe([*base_continuity, *[str(item) for item in fact_profile.get("continuity_locks", [])]]),
-        "negative_locks": _dedupe([*base_negative, *[str(item) for item in fact_profile.get("negative_locks", [])]]),
+        "asset_fact_profile": merged_fact_profile,
+        "continuity_locks": continuity_locks,
+        "negative_locks": negative_locks,
         "writes_long_term_memory": False,
         "writes_company_kb": False,
     }
@@ -304,6 +356,68 @@ def _has_robot(text: str) -> bool:
 
 def _has_rooftop(text: str) -> bool:
     return "rooftop" in text.lower() or "屋顶" in text or "天台" in text
+
+
+def _character_subtype_from_ref(ref: dict[str, Any]) -> str:
+    for value in (
+        ref.get("character_subtype"),
+        _dict_from_ref(ref, "profile_plan").get("character_subtype"),
+        _dict_from_ref(ref, "asset_fact_profile").get("character_subtype"),
+        _dict_from_ref(ref, "fact_profile").get("character_subtype"),
+    ):
+        text = str(value or "").strip()
+        if text in {"human", "animal", "robot", "subject"}:
+            return text
+    return ""
+
+
+def _preferred_subtype(values: Any) -> str:
+    candidates = [str(item or "").strip() for item in values if str(item or "").strip()] if isinstance(values, list) else []
+    for subtype in ("animal", "human", "robot", "subject"):
+        if subtype in candidates:
+            return subtype
+    return ""
+
+
+def _dict_from_ref(ref: dict[str, Any], key: str) -> dict[str, Any]:
+    value = ref.get(key)
+    if isinstance(value, dict):
+        return value
+    for container_key in ("profile_plan", "asset_fact_profile", "fact_profile"):
+        container = ref.get(container_key)
+        if isinstance(container, dict) and isinstance(container.get(key), dict):
+            return container[key]
+    return {}
+
+
+def _strings_from_ref(ref: dict[str, Any], key: str) -> list[str]:
+    values: list[str] = []
+    raw = ref.get(key)
+    if isinstance(raw, list):
+        values.extend(str(item) for item in raw)
+    elif str(raw or "").strip():
+        values.append(str(raw))
+    for container_key in ("profile_plan", "asset_fact_profile", "fact_profile"):
+        container = ref.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        raw = container.get(key)
+        if isinstance(raw, list):
+            values.extend(str(item) for item in raw)
+        elif str(raw or "").strip():
+            values.append(str(raw))
+    return _dedupe(values)
+
+
+def _merge_dicts(*values: Any) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        for key, item in value.items():
+            if str(key or "").strip() and item not in (None, "", [], {}):
+                result[str(key)] = item
+    return result
 
 
 def _slug(value: str) -> str:
