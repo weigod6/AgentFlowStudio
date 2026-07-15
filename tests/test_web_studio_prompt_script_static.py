@@ -1143,6 +1143,59 @@ process.stdout.write(JSON.stringify({
     assert "无服装" in payload["catText"] + payload["dogText"]
 
 
+def test_structured_shot_refinement_preserves_runtime_asset_profiles() -> None:
+    script = r'''
+import { refineStructuredShotAssets } from "./apps/studio/src/structured-shot.js";
+import { assetCardDraftFromRef, assetCardText } from "./apps/studio/src/asset-card-drafts.js";
+
+const shot = {
+  shot_id: "S01",
+  index: 1,
+  description: "@小明 @橘猫 @老城区巷口。小明给橘猫顺毛。",
+  asset_refs: [
+    {
+      label: "橘猫",
+      asset_type: "character",
+      status: "mentioned",
+      source: "runtime_asset_plan",
+      profile_plan: {
+        character_subtype: "animal",
+        facts: {
+          identity: "橘猫",
+          species: "猫",
+          color_pattern: "橘色",
+          current_action: ["顺毛"],
+        },
+        continuity_locks: ["保持橘色毛色"],
+        negative_locks: ["不要新增衣物"],
+      },
+    },
+  ],
+};
+const refined = refineStructuredShotAssets(shot, shot.description);
+const draft = assetCardDraftFromRef(refined.asset_refs[0], refined);
+process.stdout.write(JSON.stringify({
+  ref: refined.asset_refs[0],
+  draft,
+  text: assetCardText(draft),
+}));
+'''
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    payload = json.loads(completed.stdout)
+
+    assert payload["ref"]["profile_plan"]["character_subtype"] == "animal"
+    assert payload["draft"]["character_subtype"] == "animal"
+    assert payload["draft"]["facts"]["species"] == "猫"
+    assert "资产类型：动物角色资产" in payload["text"]
+    assert "根据分镜描述确定可复用外观辨识点" not in payload["text"]
+
+
 def test_storyboard_asset_recognition_prioritizes_principal_characters_and_manual_props() -> None:
     script = r'''
 import { structuredShotFromSegment } from "./apps/studio/src/structured-shot.js";

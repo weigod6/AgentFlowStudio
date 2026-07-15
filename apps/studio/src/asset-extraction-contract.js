@@ -150,9 +150,42 @@ export function normalizeAssetRefForContract(asset, index = 0, context = "") {
       modality_gate_status: "accepted",
       name_source: nameSource,
       provisional_name: provisionalName,
+      ...profileFields(asset),
     },
     diagnostic: null,
   };
+}
+
+function profileFields(asset) {
+  const profilePlan = plainObject(asset?.profile_plan);
+  const assetFactProfile = plainObject(asset?.asset_fact_profile);
+  const factProfile = plainObject(asset?.fact_profile);
+  const facts = plainObject(asset?.facts);
+  return {
+    character_subtype: cleanText(
+      asset?.character_subtype
+        || profilePlan?.character_subtype
+        || assetFactProfile?.character_subtype
+        || factProfile?.character_subtype
+        || "",
+    ),
+    profile_plan: profilePlan || undefined,
+    asset_fact_profile: assetFactProfile || undefined,
+    fact_profile: factProfile || undefined,
+    facts: facts || undefined,
+    continuity_locks: stringList(asset?.continuity_locks),
+    negative_locks: stringList(asset?.negative_locks),
+    fact_evidence: stringList(asset?.fact_evidence),
+    missing_fact_fields: stringList(asset?.missing_fact_fields),
+  };
+}
+
+function plainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function stringList(value) {
+  return Array.isArray(value) ? value.map((item) => cleanText(item)).filter(Boolean).slice(0, 12) : undefined;
 }
 
 function inferredAssetRefs(context) {

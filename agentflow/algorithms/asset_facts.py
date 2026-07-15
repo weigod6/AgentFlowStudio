@@ -45,6 +45,23 @@ HUMAN_TERMS = (
     "woman",
     "man",
 )
+HUMAN_CONTEXT_TERMS = (
+    "高中生",
+    "学生",
+    "放学",
+    "指尖",
+    "手指",
+    "手悬",
+    "手停",
+    "手里",
+    "口袋",
+    "手机",
+    "指节",
+    "肩颈",
+    "蹲在",
+    "追到",
+    "门环",
+)
 
 COLOR_DESCRIPTORS = (
     "灰白相间",
@@ -214,10 +231,12 @@ def infer_character_subtype(label: str, asset_type: str, evidence_text: str = ""
     text = f"{label} {evidence_text}".casefold()
     if _contains_any(text, ROBOT_TERMS):
         return "robot"
-    if _animal_species(label, evidence_text):
+    if _animal_species(label, ""):
         return "animal"
-    if _contains_any(text, HUMAN_TERMS):
+    if _contains_any(text, HUMAN_TERMS) or _has_human_context(label, evidence_text):
         return "human"
+    if _animal_species_bound_to_label(label, evidence_text):
+        return "animal"
     return "subject"
 
 
@@ -462,6 +481,33 @@ def _animal_species(label: str, evidence_text: str = "") -> str:
         if _contains_any(text, terms):
             return species
     return ""
+
+
+def _animal_species_bound_to_label(label: str, evidence_text: str = "") -> str:
+    if not label:
+        return ""
+    contexts = _label_contexts(label, evidence_text)
+    for context in contexts:
+        if _has_human_context(label, context):
+            continue
+        for species, terms in ANIMAL_TAXONOMY:
+            if _animal_terms_bound_to_label(context, label, terms):
+                return species
+    return ""
+
+
+def _animal_terms_bound_to_label(context: str, label: str, terms: tuple[str, ...]) -> bool:
+    term_pattern = "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True))
+    label_pattern = re.escape(label)
+    return bool(
+        re.search(rf"(?:{term_pattern})[^，。；,;\n]{{0,24}}(?:名叫|叫|名字|称作|取名为|{label_pattern}|[“\"']{label_pattern}[”\"'])", context, flags=re.I)
+        or re.search(rf"(?:{label_pattern}|[“\"']{label_pattern}[”\"'])[^，。；,;\n]{{0,24}}(?:是一只|这只|那只|幼崽|幼犬|小猫|小狗|{term_pattern})", context, flags=re.I)
+    )
+
+
+def _has_human_context(label: str, evidence_text: str = "") -> bool:
+    text = " ".join(_label_contexts(label, evidence_text)) or str(evidence_text or "")
+    return _contains_any(text, HUMAN_CONTEXT_TERMS)
 
 
 def _color_pattern(text: str, *, label: str) -> str:

@@ -730,6 +730,47 @@ def test_shot_asset_plan_returns_editable_asset_profiles(tmp_path, monkeypatch) 
     assert all("graph_asset_id" in ref for ref in payload["asset_refs"])
 
 
+def test_shot_asset_plan_keeps_human_and_animal_profiles_separate(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("AFS_ALLOW_REMOTE_LLM", raising=False)
+    client = TestClient(create_runtime_app(runtime_root=tmp_path))
+    project_id = "proj_human_animal_profile_plan"
+    client.post("/projects", json={"project_id": project_id, "goal": "Asset profile plan"})
+
+    shot_text = (
+        "镜号：01\n"
+        "画面描述：@小明 @橘猫 @老城区巷口。小明蹲在老城区巷口青石台阶上，"
+        "指尖沾着猫粮碎屑，正低头给蜷在纸箱里的橘猫顺毛。\n"
+        "资产：@小明（角色）、@橘猫（角色）、@老城区巷口（场景）"
+    )
+    response = client.post(
+        f"/projects/{project_id}/shot-asset-plans",
+        json={
+            "node_id": "shot_cat_alley",
+            "shot": {
+                "shot_id": "S01",
+                "index": 1,
+                "description": shot_text,
+                "asset_refs": [
+                    {"label": "小明", "asset_type": "character", "status": "mentioned", "source": "explicit"},
+                    {"label": "橘猫", "asset_type": "character", "status": "mentioned", "source": "explicit"},
+                    {"label": "老城区巷口", "asset_type": "scene", "status": "mentioned", "source": "explicit"},
+                ],
+            },
+            "script_text": shot_text,
+            "generated_at": "2026-07-15T21:45:00+08:00",
+        },
+    )
+
+    assert response.status_code == 200
+    refs = response.json()["asset_refs"]
+    xiaoming = next(item for item in refs if item["label"] == "小明")
+    cat = next(item for item in refs if item["label"] == "橘猫")
+    assert xiaoming["profile_plan"]["character_subtype"] != "animal"
+    assert cat["profile_plan"]["character_subtype"] == "animal"
+    assert cat["profile_plan"]["facts"]["species"] == "猫"
+    assert cat["profile_plan"]["facts"]["color_pattern"] == "橘色"
+
+
 def test_storyboard_plan_includes_professional_reference_for_rooftop_video() -> None:
     shots = local_storyboard_shots("A future robot stands on a rural rooftop and watches stars before turning its glowing face toward the sky.")
 
