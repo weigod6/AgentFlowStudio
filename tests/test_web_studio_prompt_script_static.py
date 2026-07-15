@@ -1013,6 +1013,75 @@ process.stdout.write(JSON.stringify({
     assert "Forbidden: software dashboard, app interface, data chart" in payload["legacyCharacterPrompt"]
 
 
+def test_asset_card_draft_uses_runtime_profile_plan_for_animal_facts() -> None:
+    script = r'''
+import { assetCardDraftFromRef, assetCardText } from "./apps/studio/src/asset-card-drafts.js";
+
+const shot = {
+  shot_id: "S01",
+  description: "镜号：01 时长：3.2 画面描述：@老槐树 @橘猫 @小狗。老槐树粗壮盘曲的树根特写，泥土湿润微裂；纸盒内橘猫蜷卧，尾巴尖轻晃，嘴里叼着湿漉漉的小狗，小狗左耳缺一小块，正打喷嚏 景别：特写 光影氛围：午后柔光，树影斑驳",
+};
+const cat = assetCardDraftFromRef({
+  label: "橘猫",
+  asset_type: "character",
+  profile_plan: {
+    character_subtype: "animal",
+    facts: {
+      identity: "橘猫",
+      species: "猫",
+      color_pattern: "橘色",
+      current_action: ["蜷卧", "尾巴尖轻晃", "叼着小狗"],
+      relationship: ["保护小狗"],
+    },
+    continuity_locks: ["保持橘猫身份", "保持橘色毛色", "保持尾巴动作和体型比例"],
+    negative_locks: ["不要新增项圈或衣物"],
+    fact_evidence: ["纸盒内橘猫蜷卧，尾巴尖轻晃，嘴里叼着湿漉漉的小狗"],
+  },
+}, shot);
+const dog = assetCardDraftFromRef({
+  label: "小狗",
+  asset_type: "character",
+  profile_plan: {
+    character_subtype: "animal",
+    facts: {
+      identity: "小狗",
+      species: "狗",
+      color_pattern: "灰白相间",
+      surface_state: "湿漉漉",
+      size_or_age: "幼小",
+      distinctive_marks: ["左耳缺一小块"],
+      current_action: ["打喷嚏"],
+    },
+    continuity_locks: ["保持灰白相间毛色", "保持左耳缺一小块", "保持幼小体型"],
+    negative_locks: ["不要新增项圈或衣物"],
+  },
+}, shot);
+process.stdout.write(JSON.stringify({
+  cat,
+  dog,
+  catText: assetCardText(cat),
+  dogText: assetCardText(dog),
+}));
+'''
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    payload = json.loads(completed.stdout)
+    surface = json.dumps(payload, ensure_ascii=False)
+
+    for expected in ("橘色", "尾巴尖轻晃", "叼着小狗", "灰白相间", "湿漉漉", "左耳缺一小块"):
+        assert expected in surface
+    for placeholder in ("身份与外观待确认", "服装或外观按分镜语境确定", "根据分镜描述确定可复用外观辨识点"):
+        assert placeholder not in surface
+    assert payload["cat"]["character_subtype"] == "animal"
+    assert payload["dog"]["facts"]["color_pattern"] == "灰白相间"
+    assert "无服装" in payload["catText"] + payload["dogText"]
+
+
 def test_storyboard_asset_recognition_prioritizes_principal_characters_and_manual_props() -> None:
     script = r'''
 import { structuredShotFromSegment } from "./apps/studio/src/structured-shot.js";

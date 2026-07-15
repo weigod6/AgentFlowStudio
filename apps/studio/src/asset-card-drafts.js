@@ -35,10 +35,14 @@ export function assetCardDraftFromRef(asset, structuredShot, options = {}) {
   const assetType = safeAssetType(asset?.asset_type);
   const label = safeLabel(asset?.label, assetType);
   const shotText = shotDescription(structuredShot);
-  const featureCard = defaultFeatureCard(assetType, label, shotText);
+  const profile = assetProfileFromRef(asset);
+  const featureCard = featureCardFromProfile(assetType, label, shotText, profile)
+    || defaultFeatureCard(assetType, label, shotText);
+  const profileLocks = continuityLocksFromProfile(profile);
   return normalizeAssetCardDraft({
     card_id: `asset_card:${structuredShot?.shot_id || "shot"}:${assetType}:${slug(label)}`,
     asset_type: assetType,
+    character_subtype: cleanText(profile?.character_subtype || asset?.character_subtype || ""),
     label,
     status: "draft",
     source: "shot_asset_recognition",
@@ -46,9 +50,14 @@ export function assetCardDraftFromRef(asset, structuredShot, options = {}) {
     source_shot_id: structuredShot?.shot_id || "",
     source_asset_ref: asset || {},
     role_in_shot: roleInShot(assetType, label),
-    signature: signatureFor(assetType, label, shotText),
+    signature: signatureFromProfile(assetType, label, profile) || signatureFor(assetType, label, shotText),
     feature_card: featureCard,
-    negative_locks: defaultLocks(assetType, label),
+    negative_locks: profileLocks.length ? profileLocks : defaultLocks(assetType, label),
+    provider_negative_locks: stringList(profile?.negative_locks || asset?.negative_locks),
+    facts: plainObject(profile?.facts || asset?.facts),
+    fact_evidence: stringList(profile?.fact_evidence || asset?.fact_evidence),
+    missing_fact_fields: stringList(profile?.missing_fact_fields || asset?.missing_fact_fields),
+    asset_fact_profile: profile || asset?.asset_fact_profile || null,
     evidence_text: shotText.slice(0, 500),
     memory_policy: {
       writes_fixed_asset: false,
@@ -431,6 +440,212 @@ function propInteraction(label, text) {
 
 function propSignatureHint(label, text) {
   return `${propAppearance(label, text)}，${propMaterial(label, text)}`.slice(0, 90);
+}
+
+function assetProfileFromRef(asset) {
+  const candidates = [asset?.profile_plan, asset?.asset_fact_profile, asset?.fact_profile];
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) return candidate;
+  }
+  const facts = plainObject(asset?.facts);
+  if (Object.keys(facts).length) {
+    return {
+      facts,
+      character_subtype: cleanText(asset?.character_subtype || ""),
+      continuity_locks: stringList(asset?.continuity_locks),
+      negative_locks: stringList(asset?.negative_locks),
+      fact_evidence: stringList(asset?.fact_evidence),
+      missing_fact_fields: stringList(asset?.missing_fact_fields),
+    };
+  }
+  return null;
+}
+
+function featureCardFromProfile(assetType, label, shotText, profile) {
+  if (!profile || typeof profile !== "object") return null;
+  const facts = plainObject(profile.facts);
+  if (!Object.keys(facts).length) return null;
+  const subtype = cleanText(profile.character_subtype || "");
+  if (assetType === "character" && subtype === "animal") {
+    return animalFeatureCardFromFacts(label, facts, profile);
+  }
+  if (assetType === "character" && subtype === "robot") {
+    return robotFeatureCardFromFacts(label, facts, profile, shotText);
+  }
+  if (assetType === "character") {
+    return humanFeatureCardFromFacts(label, facts, profile, shotText);
+  }
+  if (assetType === "scene") {
+    return sceneFeatureCardFromFacts(label, facts, profile, shotText);
+  }
+  if (assetType === "prop") {
+    return propFeatureCardFromFacts(label, facts, profile, shotText);
+  }
+  return null;
+}
+
+function animalFeatureCardFromFacts(label, facts, profile) {
+  const species = factText(facts, "species");
+  const color = factText(facts, "color_pattern");
+  const state = factText(facts, "surface_state");
+  const age = factText(facts, "size_or_age");
+  const marks = factList(facts, "distinctive_marks");
+  const actions = factList(facts, "current_action");
+  const relationships = factList(facts, "relationship");
+  const evidence = evidenceSummary(profile);
+  return {
+    identity: compactJoin([label, species && `物种：${species}`], "；") || label,
+    appearance: compactJoin([
+      species && `${species}动物主体`,
+      color && `${color}毛色/花纹`,
+      state && `${state}体表状态`,
+      age && `${age}体型/年龄感`,
+      ...marks,
+    ], "；") || evidence || `${label}动物外观按分镜事实保持`,
+    hair: compactJoin([
+      color && `毛色/花纹：${color}`,
+      state && `毛发/体表状态：${state}`,
+      ...marks,
+    ], "；") || `按证据保持${label}毛发、耳朵、尾巴和体表特征`,
+    face: marks.length ? marks.join("；") : `保持${label}头部、耳朵、眼睛、口鼻轮廓一致`,
+    build: compactJoin([age && `体型：${age}`, actions.length && `动作能力：${actions.join("、")}`], "；")
+      || `保持${label}体型比例和动物动作能力`,
+    wardrobe: "无服装；以毛色、体表状态、耳尾结构和自然动物外形作为外观层",
+    palette: color ? `主色调/毛色：${color}` : `按分镜光影保持${label}自然毛色与体表色调`,
+    demeanor: compactJoin([
+      actions.length && `当前动作/状态：${actions.join("、")}`,
+      relationships.length && `关系：${relationships.join("、")}`,
+    ], "；") || "神态和动作服务当前分镜剧情",
+    reference_views: "动物设定板：正面头部特写 + 全身正面居中 + 左侧面全身 + 背面全身；不添加衣物、项圈或无关道具，毛色/体型/耳尾/标记保持一致",
+  };
+}
+
+function humanFeatureCardFromFacts(label, facts, profile, shotText) {
+  const hair = factText(facts, "hair");
+  const wardrobe = factText(facts, "wardrobe");
+  const appearance = factText(facts, "appearance_context") || evidenceSummary(profile) || shotText;
+  return {
+    identity: factText(facts, "identity") || label,
+    appearance: appearance || characterAppearance(label, shotText),
+    hair: hair || characterHair(label, shotText),
+    face: characterFace(label, appearance || shotText),
+    build: characterBuild(label, appearance || shotText),
+    wardrobe: wardrobe || characterWardrobe(label, shotText),
+    palette: characterPalette(label, appearance || shotText),
+    demeanor: characterDemeanor(label, appearance || shotText),
+    reference_views: "正面半身特写 + 全身正面居中 + 左侧面全身 + 背面全身；无任何道具或背景物体，比例与外观保持一致",
+  };
+}
+
+function robotFeatureCardFromFacts(label, facts, profile, shotText) {
+  const shell = factText(facts, "body_material_or_shell") || evidenceSummary(profile);
+  return {
+    identity: factText(facts, "identity") || label,
+    appearance: shell || characterAppearance(label, shotText),
+    hair: "无自然毛发；头部外壳、发光结构或机械轮廓作为识别点",
+    face: shell || "保持头部外壳、面部结构和发光部件一致",
+    build: "保持机械体型比例、躯干和四肢结构关系",
+    wardrobe: "无传统服装；机械外壳与发光部件作为外观层",
+    palette: characterPalette(label, shell || shotText),
+    demeanor: characterDemeanor(label, shell || shotText),
+    reference_views: "机器人设定板：头部特写 + 全身正面 + 左侧面 + 背面；机械结构、材质和发光部件保持一致",
+  };
+}
+
+function sceneFeatureCardFromFacts(label, facts, profile, shotText) {
+  const elements = factList(facts, "key_environment_elements");
+  const structure = factText(facts, "spatial_structure");
+  const lighting = factText(facts, "lighting_atmosphere");
+  return {
+    location: factText(facts, "location_type") || label,
+    layout: structure || sceneLayout(shotText),
+    props: elements.length ? elements.join("；") : sceneProps(shotText),
+    lighting_mood: lighting || sceneLightingMood(shotText),
+    palette: scenePalette(shotText),
+    time_weather: sceneTimeWeather(shotText),
+    view_set: "同一场景的俯瞰全景、正向广角、入口/边缘视角、光影或材质细节视角，空间关系保持一致",
+  };
+}
+
+function propFeatureCardFromFacts(label, facts, profile, shotText) {
+  const appearance = factText(facts, "appearance") || evidenceSummary(profile);
+  return {
+    category: factText(facts, "identity") || label,
+    appearance: appearance || propAppearance(label, shotText),
+    material: propMaterial(label, appearance || shotText),
+    scale: "与角色/场景比例一致",
+    usage: propUsage(label, appearance || shotText),
+    interaction: propInteraction(label, appearance || shotText),
+    continuity: "后续镜头保持同一造型、材质和使用状态",
+    reference_views: "正面、侧面、俯视、局部结构/材质特写，比例与材质保持一致",
+  };
+}
+
+function signatureFromProfile(assetType, label, profile) {
+  if (!profile || typeof profile !== "object") return "";
+  const facts = plainObject(profile.facts);
+  if (!Object.keys(facts).length) return "";
+  const subtype = cleanText(profile.character_subtype || "");
+  const summary = profileFactSummary(assetType, subtype, facts);
+  return summary ? `${label}：${summary}`.slice(0, 120) : "";
+}
+
+function profileFactSummary(assetType, subtype, facts) {
+  if (assetType === "character" && subtype === "animal") {
+    return compactJoin([
+      factText(facts, "species"),
+      factText(facts, "color_pattern") && `${factText(facts, "color_pattern")}毛色/花纹`,
+      factText(facts, "size_or_age"),
+      factText(facts, "surface_state"),
+      ...factList(facts, "distinctive_marks").slice(0, 2),
+      ...factList(facts, "current_action").slice(0, 3),
+    ], "；");
+  }
+  if (assetType === "scene") {
+    return compactJoin([
+      factText(facts, "location_type"),
+      factText(facts, "spatial_structure"),
+      factText(facts, "lighting_atmosphere"),
+    ], "；");
+  }
+  return compactJoin(Object.values(facts).flatMap((value) => Array.isArray(value) ? value : [value]).slice(0, 5), "；");
+}
+
+function continuityLocksFromProfile(profile) {
+  return stringList(profile?.continuity_locks || profile?.identity_locks).slice(0, 8);
+}
+
+function factText(facts, key) {
+  const value = facts?.[key];
+  if (Array.isArray(value)) return value.map(cleanText).filter(Boolean).join("、");
+  return cleanText(value);
+}
+
+function factList(facts, key) {
+  const value = facts?.[key];
+  const items = Array.isArray(value) ? value : [value];
+  return items.map(cleanText).filter(Boolean).slice(0, 8);
+}
+
+function evidenceSummary(profile) {
+  return stringList(profile?.fact_evidence || profile?.evidence_text).join("；").slice(0, 180);
+}
+
+function plainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function stringList(value) {
+  const source = Array.isArray(value) ? value : String(value || "").split(/\r?\n/);
+  return source.map(cleanText).filter(Boolean).slice(0, 16);
+}
+
+function compactJoin(values, separator) {
+  return values.map(cleanText).filter(Boolean).join(separator);
+}
+
+function cleanText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
 }
 
 function safeAssetType(value) { return ["character", "scene", "prop"].includes(String(value || "")) ? String(value) : "character"; }
