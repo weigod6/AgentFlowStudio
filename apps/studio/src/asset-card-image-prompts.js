@@ -49,7 +49,7 @@ export function assetCardPromptPlaceholder(assetType) {
 }
 
 function assetImageLead(card) {
-  return `Visual target: reusable ${assetCardTypeLabel(card.asset_type)} reference image for asset named ${cleanAssetName(card.label)}.`;
+  return `Visual target: reusable ${assetCardTypeLabel(card.asset_type, card.character_subtype)} reference image for asset named ${cleanAssetName(card.label)}.`;
 }
 
 function assetImageModeInstruction(assetType, label) {

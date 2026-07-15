@@ -49,7 +49,7 @@ function render(modal, draft, mode) {
     <div class="modal-head">
       <div>
         <div class="eyebrow">候选资产卡</div>
-        <h3>编辑${assetCardTypeLabel(draft.asset_type)}</h3>
+        <h3>编辑${assetCardTypeLabel(draft.asset_type, draft.character_subtype)}</h3>
       </div>
       <button class="icon-btn" data-action="close" title="关闭">×</button>
     </div>
@@ -116,7 +116,7 @@ function saveAssetCard(store, nodeId, draft, previousDraft, referenceMode) {
       node.params.assetCardDraft.updated_by_user = true;
     }
     node.content = assetCardText(draft);
-    node.title = `${assetCardTypeLabel(draft.asset_type)} · @${draft.label}`;
+    node.title = `${assetCardTypeLabel(draft.asset_type, draft.character_subtype)} · @${draft.label}`;
     node.status = "complete";
     node.params.spec = {
       ...(node.params.spec || {}),

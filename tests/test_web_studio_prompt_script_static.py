@@ -1137,6 +1137,9 @@ process.stdout.write(JSON.stringify({
         assert placeholder not in surface
     assert payload["cat"]["character_subtype"] == "animal"
     assert payload["dog"]["facts"]["color_pattern"] == "灰白相间"
+    assert "资产类型：动物角色资产" in payload["catText"]
+    assert "资产类型：动物角色资产" in payload["dogText"]
+    assert "资产类型：角色资产" not in payload["catText"] + payload["dogText"]
     assert "无服装" in payload["catText"] + payload["dogText"]
 
 

@@ -91,7 +91,9 @@ export function normalizeAssetCardDraft(draft) {
 
 export function assetCardFieldsForType(assetType) { return ASSET_CARD_FIELDS[safeAssetType(assetType)] || ASSET_CARD_FIELDS.character; }
 
-export function assetCardTypeLabel(assetType) {
+export function assetCardTypeLabel(assetType, characterSubtype = "") {
+  if (safeAssetType(assetType) === "character" && cleanText(characterSubtype) === "animal") return "动物角色资产";
+  if (safeAssetType(assetType) === "character" && cleanText(characterSubtype) === "robot") return "机器人角色资产";
   return { character: "角色资产", scene: "场景资产", prop: "道具资产" }[safeAssetType(assetType)];
 }
 
@@ -103,7 +105,7 @@ export function assetCardText(draft) {
     ? card.negative_locks.map((item) => `- ${item}`)
     : ["- 确认固定前不进入生成约束"];
   return [
-    `资产类型：${assetCardTypeLabel(card.asset_type)}`,
+    `资产类型：${assetCardTypeLabel(card.asset_type, card.character_subtype)}`,
     `资产名称：@${card.label}`,
     "状态：候选草稿，确认固定前不会进入关键帧约束",
     `一句话签名：${card.signature}`,

@@ -243,7 +243,7 @@ function applyAssetDraftToNode(store, nodeId, draft, structuredShot, scriptNodeI
     const node = s.nodes[nodeId];
     if (!node) return;
     const referenceStack = nodeReferenceStackForGraphBoundAssets(bindingGraph, { asset_refs: [asset] }, nodeId);
-    node.title = `${assetCardTypeLabel(draft.asset_type)} · @${draft.label}`;
+    node.title = `${assetCardTypeLabel(draft.asset_type, draft.character_subtype)} · @${draft.label}`;
     node.prompt = "";
     node.content = assetCardText(draft);
     node.status = "complete";

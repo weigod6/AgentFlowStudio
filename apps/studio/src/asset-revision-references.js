@@ -147,7 +147,7 @@ export function assetCardRevisionPromptSupplement(node) {
   }
   const editPolicy = revisionEditPolicyLines(revision);
   const locks = revision.preserve_locks.length ? `Card locks to preserve: ${revision.preserve_locks.join("; ")}` : "";
-  const typeLabel = assetCardTypeLabel(revision.asset_type);
+  const typeLabel = assetCardTypeLabel(revision.asset_type, revision.character_subtype);
   return [
     `${typeLabel} revision mode: ${hasRefs ? "image-guided partial revision" : "text-only revision with drift risk"}.`,
     hasRefs
@@ -166,7 +166,7 @@ export function assetCardRevisionPromptSupplement(node) {
 }
 
 function originalizeRevisionPromptSupplement(revision, hasRefs, changes) {
-  const typeLabel = assetCardTypeLabel(revision.asset_type);
+  const typeLabel = assetCardTypeLabel(revision.asset_type, revision.character_subtype);
   const locks = revision.preserve_locks.length ? `Safety constraints to respect without copying IP: ${revision.preserve_locks.join("; ")}` : "";
   return [
     `${typeLabel} reference transformation mode: originalize / IP-risk reduction.`,

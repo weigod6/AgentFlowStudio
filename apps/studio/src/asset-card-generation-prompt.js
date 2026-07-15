@@ -8,7 +8,7 @@ export function assetCardPromptText(node) {
   const generated = assetImagePrompt(draft);
   const revision = assetCardRevisionPromptSupplement(node);
   const manual = assetPromptSupplementFromNode(node);
-  const typeLabel = assetCardTypeLabel(draft.asset_type);
+  const typeLabel = assetCardTypeLabel(draft.asset_type, draft.character_subtype);
   const guard = [
     `${typeLabel}生成模式：只生成 @${String(draft.label || "").replace(/^@+/, "") || "资产"} 的可复用视觉参考，不生成完整分镜关键帧。`,
     "不得把上游分镜直接画成单张剧情插画；必须输出可审查、可固定、后续可复用的角色/场景/道具参考图。",
