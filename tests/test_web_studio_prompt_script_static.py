@@ -1289,6 +1289,75 @@ process.stdout.write(JSON.stringify({
     assert "夜晚城市屋顶" not in visible_text
 
 
+def test_script_asset_recognition_does_not_create_template_cards_when_runtime_plan_fails() -> None:
+    script = r'''
+import { identifyScriptAssets } from "./apps/studio/src/storyboard-node-actions.js";
+
+const state = {
+  nodes: {
+    script_1: {
+      id: "script_1",
+      type: "script",
+      title: "分镜 01",
+      x: 0,
+      y: 0,
+      w: 320,
+      h: 240,
+      prompt: "镜号：01 画面描述：@小明 @橘猫。小明轻抚怀中橘猫脊背，猫呼噜声轻柔持续。",
+      content: "镜号：01 画面描述：@小明 @橘猫。小明轻抚怀中橘猫脊背，猫呼噜声轻柔持续。",
+      status: "complete",
+      params: { scriptSegmentIndex: 1 },
+    },
+  },
+  edges: {},
+  order: ["script_1"],
+  groups: {},
+  selection: { nodeIds: ["script_1"], edgeId: null },
+  ui: {},
+};
+
+const store = {
+  get: () => state,
+  set: (mutator) => mutator(state),
+  nextId: (prefix) => `${prefix}_should_not_be_used`,
+};
+const runtime = {
+  planShotAssets: async () => {
+    const error = new Error("authentication_required");
+    error.status = 401;
+    throw error;
+  },
+};
+
+const created = await identifyScriptAssets(store, runtime, state.nodes.script_1);
+
+process.stdout.write(JSON.stringify({
+  created,
+  nodes: state.nodes,
+  order: state.order,
+  scriptStatus: state.nodes.script_1.status,
+  result: state.nodes.script_1.result,
+  blockedReason: state.nodes.script_1.params.generationBlockedReason,
+}));
+'''
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    payload = json.loads(completed.stdout)
+    visible_text = json.dumps(payload, ensure_ascii=False)
+
+    assert payload["created"] == []
+    assert list(payload["nodes"].keys()) == ["script_1"]
+    assert payload["order"] == ["script_1"]
+    assert payload["scriptStatus"] == "error"
+    assert "资产规划暂时不可用" in visible_text
+    assert "可复用角色，身份与外观待确认" not in visible_text
+
+
 def test_keyframe_generation_carries_connected_asset_card_images_as_local_refs() -> None:
     script = r'''
 import { buildKeyframeGenerationRequest } from "./apps/studio/src/optimizer-contract.js";
