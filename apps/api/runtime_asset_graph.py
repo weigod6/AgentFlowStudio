@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from agentflow.algorithms.asset_facts import build_asset_fact_profile
+
 
 ASSET_GRAPH_STAGE = "candidate_asset_graph"
 ASSET_TYPES = {"character", "scene", "prop"}
@@ -57,7 +59,7 @@ def build_asset_graph(
                     "source": normalized.get("source", "candidate"),
                 }
             )
-    assets = [_final_asset(builder) for builder in builders.values()]
+    assets = [_final_asset(builder, source_text=source_text) for builder in builders.values()]
     graph = {
         "artifact_type": "agentflow_asset_graph",
         "schema_version": "0.1.0",
@@ -160,13 +162,23 @@ def _merge_ref(builder: dict[str, Any], ref: dict[str, Any], shot_id: str, sourc
             builder["evidence_spans"].append(span)
 
 
-def _final_asset(builder: dict[str, Any]) -> dict[str, Any]:
+def _final_asset(builder: dict[str, Any], *, source_text: str = "") -> dict[str, Any]:
     asset_type = str(builder["asset_type"])
     evidence_text = " ".join(item["text"] for item in builder["evidence_spans"][:3])
+    fact_profile = build_asset_fact_profile(
+        asset_type=asset_type,
+        label=str(builder["label"]),
+        evidence_text=evidence_text,
+        source_text=source_text,
+    )
+    character_subtype = str(fact_profile.get("character_subtype") or "")
+    base_continuity = [] if character_subtype == "animal" else _continuity_locks(asset_type, builder["label"], evidence_text)
+    base_negative = [] if character_subtype == "animal" else _negative_locks(asset_type, builder["label"], evidence_text)
     return {
         "graph_asset_id": builder["graph_asset_id"],
         "asset_id": builder.get("asset_id") or builder["graph_asset_id"],
         "asset_type": asset_type,
+        "character_subtype": character_subtype,
         "label": builder["label"],
         "display_name": builder.get("display_name") or builder["label"],
         "role": _role(asset_type),
@@ -183,8 +195,12 @@ def _final_asset(builder: dict[str, Any]) -> dict[str, Any]:
         "modality_gate_status": "accepted",
         "name_source": (builder["name_sources"] or ["candidate"])[0],
         "provisional_name": bool(builder.get("provisional_name")),
-        "continuity_locks": _continuity_locks(asset_type, builder["label"], evidence_text),
-        "negative_locks": _negative_locks(asset_type, builder["label"], evidence_text),
+        "facts": fact_profile.get("facts") if isinstance(fact_profile.get("facts"), dict) else {},
+        "fact_evidence": fact_profile.get("fact_evidence") if isinstance(fact_profile.get("fact_evidence"), list) else [],
+        "missing_fact_fields": fact_profile.get("missing_fact_fields") if isinstance(fact_profile.get("missing_fact_fields"), list) else [],
+        "asset_fact_profile": fact_profile,
+        "continuity_locks": _dedupe([*base_continuity, *[str(item) for item in fact_profile.get("continuity_locks", [])]]),
+        "negative_locks": _dedupe([*base_negative, *[str(item) for item in fact_profile.get("negative_locks", [])]]),
         "writes_long_term_memory": False,
         "writes_company_kb": False,
     }
@@ -292,6 +308,15 @@ def _has_rooftop(text: str) -> bool:
 
 def _slug(value: str) -> str:
     return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", str(value or "")).lower()[:48] or "asset"
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
 
 
 def _list(value: Any) -> list[Any]:

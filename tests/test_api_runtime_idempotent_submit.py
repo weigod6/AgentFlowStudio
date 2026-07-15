@@ -7,7 +7,9 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from apps.api import runtime_generation_comparisons, runtime_keyframe_routes, runtime_video_routes
+from apps.api.runtime_submit_idempotency import begin_submit_idempotency, stable_submit_request_id
 from apps.api.runtime_service import create_runtime_app
+from apps.api.runtime_store import RuntimeStore
 
 
 PNG_BYTES = base64.b64decode(
@@ -122,6 +124,45 @@ def test_generation_comparison_submit_replays_same_request_and_conflicts_changed
     )
     _assert_idempotency_conflict(changed, existing_job_id=first_job_id)
     _assert_completed_ledger(runtime_root, project_id, "generation_comparison", first_job_id)
+
+
+def test_submit_idempotency_uses_short_path_tokens_for_long_runtime_ids(tmp_path) -> None:
+    store = RuntimeStore(tmp_path / "runtime")
+    project_id = "video-generation-asset-graph-feedback-with-extra-long-project-name"
+    action = "video_generation_with_extra_long_action_name"
+    client_request_id = "client-request-id-" + ("x" * 120)
+
+    reservation = begin_submit_idempotency(
+        store,
+        project_id=project_id,
+        action=action,
+        request={"prompt_text": "stable", "generated_at": "2026-07-15T10:00:00+08:00"},
+        client_request_id=client_request_id,
+        request_id="req_long_path",
+    )
+
+    assert reservation.state == "reserved"
+    assert reservation.ledger["project_id"] == project_id
+    assert reservation.ledger["action"] == action
+    assert reservation.ledger["stable_request_id"] == stable_submit_request_id(client_request_id, reservation.fingerprint)
+    assert all(len(part) <= 28 for part in reservation.ledger_dir.parts[-3:-1])
+    assert len(reservation.ledger_dir.parts[-1]) <= 24
+    assert (reservation.ledger_dir / "ledger.json").is_file()
+
+
+def test_runtime_store_uses_short_storage_paths_for_long_job_ids(tmp_path) -> None:
+    store = RuntimeStore(tmp_path / "runtime")
+    project_id = "video-generation-asset-graph-feedback"
+    job_id = f"{project_id}-video_generation-" + ("x" * 80)
+
+    run_dir = store.run_dir(project_id, job_id)
+    job_path = store.job_path(job_id)
+
+    assert run_dir.parts[-2] == project_id
+    assert run_dir.parts[-1] != job_id
+    assert len(run_dir.parts[-1]) <= 24
+    assert job_path.name != f"{job_id}.json"
+    assert len(job_path.stem) <= 80
 
 
 def _assert_idempotency_conflict(response, *, existing_job_id: str) -> None:

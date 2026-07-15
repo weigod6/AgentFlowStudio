@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from agentflow.algorithms.asset_facts import animal_assets_only, has_human_asset
 from agentflow.knowledge.director_scenarios import director_scenario_from_text
 from agentflow.knowledge.professional_reference import professional_reference_from_text
 from agentflow.algorithms.provider_gate_manifest.asset_graph_context import (
@@ -68,9 +69,12 @@ def _plan_source(
 
 
 def _composition_plan(source: str, aspect_ratio: str) -> dict[str, str]:
+    shot_size = "wide_or_medium_wide" if _wide_scene(source) else "medium"
+    if "close" in source.lower() or "\u7279\u5199" in source:
+        shot_size = "close_or_extreme_close"
     return {
         "aspect_ratio": aspect_ratio,
-        "shot_size": "medium" if not _wide_scene(source) else "wide_or_medium_wide",
+        "shot_size": shot_size,
         "subject_placement": "clear primary subject with stable readable environment",
         "background_policy": "use only scripted or referenced scene geometry",
     }
@@ -92,10 +96,11 @@ def _asset_locks(
 ) -> list[dict[str, Any]]:
     locks: list[dict[str, Any]] = []
     for ref in refs:
+        role = str(ref.get("role") or ref.get("asset_type") or "reference")
         locks.append(
             {
                 "asset_id": str(ref.get("asset_id") or ""),
-                "role": str(ref.get("role") or ref.get("asset_type") or "reference"),
+                "role": role,
                 "lock_fields": ["identity", "silhouette", "proportions", "materials"],
             }
         )
@@ -166,11 +171,16 @@ def _camera_plan(source: str) -> str:
 
 def _forbidden_changes(source: str, asset_graph_context: dict[str, Any] | None) -> list[str]:
     changes = ["text", "watermark", "UI", "borders", "new characters", "identity drift", "unrequested props"]
+    assets = _graph_locked_assets(asset_graph_context)
+    if animal_assets_only(assets):
+        changes.extend(["species drift", "fur/marking changes", "unrequested human adornments"])
+    elif has_human_asset(assets):
+        changes.extend(["unrequested wardrobe changes"])
     if _has_rooftop(source):
         changes.extend(["unrequested eaves", "unrequested chair", "unrequested stool"])
     if _has_robot(source):
         changes.extend(["humanizing the robot beyond approved design", "changing robot head shell"])
-    for asset in _graph_locked_assets(asset_graph_context):
+    for asset in assets:
         changes.extend(_dedupe(asset.get("negative_locks") or []))
     changes.extend(_feedback_forbidden_changes(asset_graph_context))
     return _dedupe(changes)

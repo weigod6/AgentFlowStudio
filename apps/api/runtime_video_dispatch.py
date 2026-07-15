@@ -600,6 +600,7 @@ def _validate_provider_request(request: VideoGenerationRequest, descriptor: Any)
 
 
 def _blocked_result(project_id: str, output_dir: Path, context_bundle: dict[str, Any] | None, model_call_context: dict[str, Any], artifacts: dict[str, Any], model_request_plan: dict[str, Any], block: dict[str, Any], provider_gate: dict[str, str] | None = None, *, blocks: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    output_dir.mkdir(parents=True, exist_ok=True)
     manifest = safe_manifest(
         project_id,
         status="blocked",

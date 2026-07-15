@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from agentflow.harness.json_io import write_json
 from apps.api.runtime_errors import safe_error_detail
-from apps.api.runtime_store import RuntimeStore, read_json, safe_id
+from apps.api.runtime_store import RuntimeStore, read_json, safe_id, storage_path_token
 
 
 SCHEMA_VERSION = "afs_runtime_submit_idempotency.v0.1"
@@ -215,7 +215,13 @@ def _stable_payload(value: Any) -> Any:
 
 
 def _ledger_dir(store: RuntimeStore, project_id: str, action: str, stable_request_id: str) -> Path:
-    return store.root / "submit_idempotency" / safe_id(project_id) / safe_id(action) / safe_id(stable_request_id)
+    return (
+        store.root
+        / "submit_idempotency"
+        / storage_path_token(project_id, max_len=28)
+        / storage_path_token(action, max_len=28)
+        / storage_path_token(stable_request_id, max_len=24)
+    )
 
 
 def _json_digest(payload: Any) -> str:

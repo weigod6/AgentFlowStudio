@@ -10,7 +10,7 @@ from apps.api.runtime_artifacts import feedback_ref
 from apps.api.runtime_canvas_draft import build_canvas_draft
 from apps.api.runtime_events import runtime_review_decision_event
 from apps.api.runtime_flow import build_flow_summary
-from apps.api.runtime_jobs import runtime_job, safe_job_id
+from apps.api.runtime_jobs import runtime_job
 from apps.api.runtime_models import (
     CanvasDraftRequest,
     ContentCardRegisterRequest,
@@ -182,7 +182,7 @@ def register_runtime_v02_routes(app: FastAPI, store: RuntimeStore) -> None:
     def record_review_decision(project_id: str, request: ReviewDecisionRecordRequest) -> dict[str, Any]:
         store.ensure_project_manifest(project_id)
         job_id = store.new_job_id("record_review_decision", project_id)
-        output_dir = store.feedback_dir / safe_job_id(project_id) / safe_job_id(job_id)
+        output_dir = store.feedback_run_dir(project_id, job_id)
         output_dir.mkdir(parents=True, exist_ok=True)
         event = runtime_review_decision_event(
             project_id,

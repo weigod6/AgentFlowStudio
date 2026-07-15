@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from agentflow.algorithms.asset_facts import render_asset_prompt_line
 from apps.api.runtime_director_compiler import compile_director_setup
 from apps.api.runtime_models import DirectorSetup2D, TemporaryLockOverride
 
@@ -70,13 +71,17 @@ def text_channel(
                 identity_lines.append(line)
             continue
         card = asset.get("feature_card") if isinstance(asset.get("feature_card"), dict) else {}
-        card_text = "; ".join(f"{key}: {value}" for key, value in card.items())
         locks = [
             lock
             for lock in asset.get("negative_locks", [])
             if (str(asset.get("asset_id")), str(lock)) not in overrides
         ]
-        line = f"{asset.get('label')}: {asset.get('signature')}. {card_text}. Locks: {'; '.join(locks)}".strip()
+        render_asset = {**asset, "negative_locks": locks}
+        line = render_asset_prompt_line(render_asset, negative_locks=locks)
+        if "证据事实" not in line:
+            card_text = _provider_safe_feature_card_text(card)
+            fallback = f"{asset.get('label')}: {asset.get('signature')}".strip()
+            line = f"{fallback}. {card_text}. Locks: {'; '.join(locks)}".strip()
         line = _sanitize_asset_line_for_visible_prompt(line, visible_prompt)
         if asset.get("asset_type") == "scene":
             scene_lines.append(line)
@@ -143,6 +148,19 @@ def _is_reference_localized_edit(bundle: dict[str, Any], visible_prompt: str) ->
     )
     preserve_terms = ("preserve", "keep", "保持", "不变")
     return any(term in prompt for term in edit_terms) and any(term in prompt for term in preserve_terms)
+
+
+def _provider_safe_feature_card_text(card: dict[str, Any]) -> str:
+    parts: list[str] = []
+    placeholder_terms = ("待确认", "后续可人工补充", "根据分镜", "pending human confirmation", "pending confirmation")
+    for key, value in card.items():
+        text = str(value or "").strip()
+        if not text:
+            continue
+        if any(term in text for term in placeholder_terms):
+            continue
+        parts.append(f"{key}: {text}")
+    return "; ".join(parts)
 
 
 def _sanitize_asset_line_for_visible_prompt(line: str, visible_prompt: str) -> str:

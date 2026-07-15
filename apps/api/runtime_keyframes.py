@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from agentflow.algorithms.context_resolver import merged_reference_image_refs
+from agentflow.algorithms.prompt_integrity import validate_prompt_integrity
 from agentflow.algorithms.request_projection import build_request_plan
 from agentflow.harness.json_io import write_json
 from agentflow_studio.model_gateway.errors import ModelConfigError, ModelGatewayError
@@ -1085,10 +1086,10 @@ def _guarded_provider_keyframe_prompt(
     base_limit = max(240, limit - reserve)
     prompt = provider_keyframe_prompt(value, limit=base_limit)
     if not prompt:
-        return provider_keyframe_prompt(guard, limit=limit)
+        return validate_prompt_integrity(provider_keyframe_prompt(guard, limit=limit), field_name="keyframe_provider_prompt")
     if "保真约束" in prompt:
-        return provider_keyframe_prompt(prompt, limit=limit)
-    return provider_keyframe_prompt(f"{prompt} {guard}", limit=limit)
+        return validate_prompt_integrity(provider_keyframe_prompt(prompt, limit=limit), field_name="keyframe_provider_prompt")
+    return validate_prompt_integrity(provider_keyframe_prompt(f"{prompt} {guard}", limit=limit), field_name="keyframe_provider_prompt")
 
 
 def _image_generation_guard(

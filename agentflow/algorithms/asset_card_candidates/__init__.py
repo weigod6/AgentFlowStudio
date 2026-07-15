@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from agentflow.algorithms.asset_facts import render_asset_prompt_line
+
 
 ALGORITHM_ID = "afs.asset_card_candidates.v0.1"
 INPUT_CONTRACT = "project id and candidate asset graph"
@@ -73,17 +75,22 @@ def _candidate(project_id: str, asset: dict[str, Any]) -> dict[str, Any]:
         "source_graph_asset_id": graph_asset_id,
         "source_asset_id": str(asset.get("asset_id") or graph_asset_id),
         "asset_type": asset_type,
+        "character_subtype": str(asset.get("character_subtype") or ""),
         "status": "candidate",
         "confirmation_state": "needs_human_confirmation",
         "draft_fields": {
             "display_name": label,
             "descriptive_signature": str(asset.get("descriptive_signature") or "")[:240],
+            "character_subtype": str(asset.get("character_subtype") or ""),
+            "facts": dict(asset.get("facts") or {}) if isinstance(asset.get("facts"), dict) else {},
+            "fact_evidence": _text_list(asset.get("fact_evidence"), limit=6, max_len=240),
+            "missing_fact_fields": _text_list(asset.get("missing_fact_fields"), limit=8, max_len=80),
             "evidence_modality": str(asset.get("evidence_modality") or "visual"),
             "visual_evidence_span": str(asset.get("visual_evidence_span") or "")[:240],
             "name_source": str(asset.get("name_source") or "candidate"),
             "provisional_name": bool(asset.get("provisional_name")),
             "narrative_role": str(asset.get("role") or _role(asset_type)),
-            "visual_description_seed": _visual_description_seed(asset_type, label, evidence_spans),
+            "visual_description_seed": _visual_description_seed(asset_type, label, evidence_spans, asset),
             "constraints": [str(item)[:120] for item in _list(asset.get("continuity_locks"))[:8]],
             "negative_constraints": [str(item)[:120] for item in _list(asset.get("negative_locks"))[:8]],
             "reference_policy": "requires safe media refs before provider-backed asset-card drafting",
@@ -92,6 +99,7 @@ def _candidate(project_id: str, asset: dict[str, Any]) -> dict[str, Any]:
             "shot_refs": [str(item) for item in _list(asset.get("shot_refs"))[:24]],
             "evidence_span_count": len(evidence_spans),
             "evidence_spans": evidence_spans,
+            "fact_evidence": _text_list(asset.get("fact_evidence"), limit=6, max_len=240),
             "confidence": _confidence(asset.get("confidence")),
             "evidence_modality": str(asset.get("evidence_modality") or "visual"),
             "visual_evidence_span": str(asset.get("visual_evidence_span") or "")[:240],
@@ -135,7 +143,10 @@ def _reuse_scope_counts(candidates: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
-def _visual_description_seed(asset_type: str, label: str, evidence_spans: list[dict[str, str]]) -> str:
+def _visual_description_seed(asset_type: str, label: str, evidence_spans: list[dict[str, str]], asset: dict[str, Any]) -> str:
+    rendered = render_asset_prompt_line(asset, max_facts=6)
+    if rendered and "证据事实" in rendered:
+        return rendered[:500]
     evidence = " ".join(span["text"] for span in evidence_spans[:2] if span.get("text")).strip()
     if asset_type == "character":
         fallback = f"{label} character appearance is pending human review."
@@ -184,6 +195,17 @@ def _role(asset_type: str) -> str:
 
 def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _text_list(value: Any, *, limit: int, max_len: int) -> list[str]:
+    result: list[str] = []
+    for item in _list(value):
+        text = str(item or "").strip()
+        if text and text not in result:
+            result.append(text[:max_len])
+        if len(result) >= limit:
+            break
+    return result
 
 
 __all__ = (

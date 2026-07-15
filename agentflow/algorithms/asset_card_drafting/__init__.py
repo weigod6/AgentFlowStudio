@@ -4,6 +4,7 @@ import hashlib
 import re
 from typing import Any
 
+from agentflow.algorithms.asset_facts import build_asset_fact_profile
 from agentflow.algorithms.asset_card_drafting._helpers import (
     animal_label_from_prompt,
     camera_motion,
@@ -94,14 +95,22 @@ def _character_draft(draft_id: str, project_id: str, refs: list[str], prompt_tex
 
 def _animal_subject_draft(draft_id: str, project_id: str, refs: list[str], prompt_text: str) -> dict[str, Any]:
     label = animal_label_from_prompt(prompt_text)
+    fact_profile = build_asset_fact_profile(
+        asset_type="character",
+        label=label,
+        evidence_text=prompt_text,
+    )
+    facts = fact_profile.get("facts") if isinstance(fact_profile.get("facts"), dict) else {}
+    marks = "、".join(str(item) for item in facts.get("distinctive_marks", [])[:4]) if isinstance(facts.get("distinctive_marks"), list) else ""
+    actions = "、".join(str(item) for item in facts.get("current_action", [])[:4]) if isinstance(facts.get("current_action"), list) else ""
     card = {
-        "identity": sentence_or_default(prompt_text, f"参考图中的同一只{label}，身份待人工确认"),
-        "hair": "毛色、毛发纹理和斑纹待人工确认",
-        "face": "脸部斑纹、眼睛、耳朵和胡须辨识点待人工确认",
-        "build": "体型比例、四肢和尾巴形态待人工确认",
+        "identity": sentence_or_default(prompt_text, f"参考图中的同一只{label}，物种和身份来自当前证据"),
+        "hair": f"毛色/毛发纹理：{facts.get('color_pattern')}" if facts.get("color_pattern") else "毛色、毛发纹理和斑纹待人工确认",
+        "face": f"头部/脸部辨识点：{marks}" if marks else "脸部斑纹、眼睛、耳朵和胡须辨识点待人工确认",
+        "build": f"体型/年龄感：{facts.get('size_or_age')}" if facts.get("size_or_age") else "体型比例、四肢和尾巴形态待人工确认",
         "wardrobe": "默认保持自然动物外观；服装、饰品或拟人化只在用户明确要求时添加",
         "palette": "主体毛色主色调待人工确认",
-        "demeanor": "动物神态和姿态待人工确认",
+        "demeanor": f"动物神态和姿态：{actions}" if actions else "动物神态和姿态待人工确认",
         "reference_views": "正面全身、侧面全身、背面全身、头部/脸部细节视图待人工确认",
     }
     return _base_draft(
@@ -114,6 +123,7 @@ def _animal_subject_draft(draft_id: str, project_id: str, refs: list[str], promp
         candidate_locks=[
             "keep animal identity", "keep fur color and markings", "keep eyes ears tail and body ratio",
             "keep reference-sheet views consistent", "only add human hair clothing or anthropomorphic traits when explicitly requested",
+            *[str(item) for item in fact_profile.get("continuity_locks", [])[:4]],
         ],
         confidence=0.62,
         missing_fields=missing_fields(card),
@@ -245,16 +255,27 @@ def _base_draft(
     source_video_artifact_id: str | None,
     prompt_text: str,
 ) -> dict[str, Any]:
+    fact_profile = build_asset_fact_profile(
+        asset_type=asset_type if asset_type in {"character", "scene", "prop"} else "prop",
+        label=label,
+        evidence_text=prompt_text,
+    )
     return {
         "artifact_type": "agentflow_asset_card_draft",
         "schema_version": "0.1.0",
         "project_id": project_id,
         "draft_id": draft_id,
         "asset_type": asset_type,
+        "character_subtype": str(fact_profile.get("character_subtype") or ""),
         "status": "draft",
         "label_suggestion": label,
         "signature": signature,
         "feature_card": feature_card,
+        "facts": fact_profile.get("facts") if isinstance(fact_profile.get("facts"), dict) else {},
+        "fact_evidence": fact_profile.get("fact_evidence") if isinstance(fact_profile.get("fact_evidence"), list) else [],
+        "continuity_locks": fact_profile.get("continuity_locks") if isinstance(fact_profile.get("continuity_locks"), list) else [],
+        "negative_locks": fact_profile.get("negative_locks") if isinstance(fact_profile.get("negative_locks"), list) else [],
+        "missing_fact_fields": fact_profile.get("missing_fact_fields") if isinstance(fact_profile.get("missing_fact_fields"), list) else [],
         "candidate_locks": candidate_locks,
         "confidence": confidence,
         "missing_fields": missing_fields,

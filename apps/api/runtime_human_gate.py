@@ -9,7 +9,7 @@ from agentflow.harness.json_io import write_json
 from apps.api.runtime_artifacts import feedback_ref
 from apps.api.runtime_errors import safe_error_detail
 from apps.api.runtime_flow import build_flow_summary
-from apps.api.runtime_jobs import runtime_job, safe_job_id
+from apps.api.runtime_jobs import runtime_job
 from apps.api.runtime_models import HumanGateDecisionRequest
 from apps.api.runtime_store import RuntimeStore, reject_unsafe_payload
 from apps.api.runtime_tracing import artifact_refs, write_run_trace
@@ -22,7 +22,7 @@ def register_runtime_human_gate_routes(app: FastAPI, store: RuntimeStore) -> Non
         try:
             reject_unsafe_payload(request.model_dump(mode="json"))
             job_id = store.new_job_id("human_gate_decision", project_id)
-            output_dir = store.feedback_dir / safe_job_id(project_id) / safe_job_id(job_id)
+            output_dir = store.feedback_run_dir(project_id, job_id)
             output_dir.mkdir(parents=True, exist_ok=True)
             event = build_human_gate_decision(
                 project_id=project_id,

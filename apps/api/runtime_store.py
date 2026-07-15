@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,8 @@ from agentflow.harness.json_io import exclusive_file_lock, write_json
 
 
 SAFE_ID_PATTERN = re.compile(r"[^a-zA-Z0-9_.-]+")
+RUN_JOB_PATH_TOKEN_MAX_LEN = 24
+JOB_FILE_PATH_TOKEN_MAX_LEN = 80
 
 
 class RuntimeStore:
@@ -255,14 +258,23 @@ class RuntimeStore:
         return f"{safe_id(project_id)}-{safe_id(action)}-{uuid4().hex[:12]}"
 
     def run_dir(self, project_id: str, job_id: str) -> Path:
-        return self.runs_dir / safe_id(project_id) / safe_id(job_id)
+        return self.runs_dir / safe_id(project_id) / storage_path_token(job_id, max_len=RUN_JOB_PATH_TOKEN_MAX_LEN)
+
+    def feedback_run_dir(self, project_id: str, job_id: str) -> Path:
+        return self.feedback_dir / safe_id(project_id) / storage_path_token(job_id, max_len=RUN_JOB_PATH_TOKEN_MAX_LEN)
 
     def write_job(self, job: dict[str, Any]) -> dict[str, Any]:
-        write_json(self.jobs_dir / f"{safe_id(str(job['job_id']))}.json", job)
+        write_json(self.job_path(str(job["job_id"])), job)
         return public_job(job)
 
+    def job_path(self, job_id: str) -> Path:
+        return self.jobs_dir / f"{storage_path_token(job_id, max_len=JOB_FILE_PATH_TOKEN_MAX_LEN)}.json"
+
     def load_job(self, job_id: str) -> dict[str, Any]:
-        path = self.jobs_dir / f"{safe_id(job_id)}.json"
+        path = self.job_path(job_id)
+        legacy_path = self.jobs_dir / f"{safe_id(job_id)}.json"
+        if not path.exists() and legacy_path != path and legacy_path.exists():
+            path = legacy_path
         if not path.exists():
             raise KeyError(job_id)
         return read_json(path)
@@ -376,6 +388,15 @@ def safe_id(value: str) -> str:
     return cleaned or "item"
 
 
+def storage_path_token(value: str, *, max_len: int) -> str:
+    cleaned = safe_id(value)
+    if len(cleaned) <= max_len:
+        return cleaned
+    digest = hashlib.sha256(cleaned.encode("utf-8")).hexdigest()[:8]
+    prefix = cleaned[: max(1, max_len - 9)].rstrip("-._") or "item"
+    return f"{prefix}-{digest}"[:max_len]
+
+
 def reject_unsafe_payload(payload: dict[str, Any]) -> None:
     reject_unsafe_text(json.dumps(payload, ensure_ascii=False))
 
@@ -408,4 +429,5 @@ __all__ = (
     "public_job",
     "read_json",
     "safe_id",
+    "storage_path_token",
 )

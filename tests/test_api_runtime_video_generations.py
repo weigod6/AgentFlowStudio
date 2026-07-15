@@ -10,6 +10,7 @@ from agentflow_studio.model_gateway.errors import ModelGatewayError
 from apps.api import runtime_video_routes
 from apps.api.runtime_models import VideoGenerationRequest, VideoRevisionRequest
 from apps.api.runtime_service import create_runtime_app
+from apps.api.runtime_store import RuntimeStore
 
 
 PNG_BYTES = base64.b64decode(
@@ -387,7 +388,8 @@ def test_video_generation_does_not_create_fake_placeholder_for_non_fixture_provi
     assert payload["candidate_previews"] == []
     assert payload["runtime_recovery"]["status"] == "needs_attention"
     assert payload["runtime_recovery"]["retry"]["retryable_item_ids"] == ["candidate_001"]
-    assert not (tmp_path / "runtime" / "runs" / project_id / job_id / "video_candidates" / "candidate_001.mp4").exists()
+    run_dir = RuntimeStore(tmp_path / "runtime").run_dir(project_id, job_id)
+    assert not (run_dir / "video_candidates" / "candidate_001.mp4").exists()
 
 
 def test_video_provider_prompt_removes_image_edit_language() -> None:
@@ -487,7 +489,7 @@ def test_video_generation_strips_adapter_output_dir_from_persisted_task_state(tm
     assert "d:\\" not in serialized
 
     job_id = payload["job"]["job_id"]
-    state_path = tmp_path / "runtime" / "runs" / project_id / job_id / "video_task_state.json"
+    state_path = RuntimeStore(tmp_path / "runtime").run_dir(project_id, job_id) / "video_task_state.json"
     state_text = state_path.read_text(encoding="utf-8").lower()
     assert "output_dir" not in state_text
     assert "c:\\" not in state_text

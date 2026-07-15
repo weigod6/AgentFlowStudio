@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from apps.api.runtime_service import create_runtime_app
+from apps.api.runtime_store import RuntimeStore
 
 
 PNG_BYTES = base64.b64decode(
@@ -80,7 +81,7 @@ def test_video_generation_response_task_state_and_manifest_pass_leak_assertions(
     assert payload["safe_manifest"]["media_bytes_returned_by_api"] is False
     _assert_safe_payload(payload)
 
-    run_dir = tmp_path / "runtime" / "runs" / project_id / payload["job"]["job_id"]
+    run_dir = RuntimeStore(tmp_path / "runtime").run_dir(project_id, payload["job"]["job_id"])
     manifest = json.loads((run_dir / "video_generation_safe_manifest.json").read_text(encoding="utf-8"))
     _assert_safe_payload(manifest)
     assert not (run_dir / "video_task_state.json").exists()

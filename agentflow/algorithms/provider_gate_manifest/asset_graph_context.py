@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from agentflow.algorithms.asset_facts import build_asset_fact_profile, render_asset_prompt_line
+
 
 def asset_graph_from_context_bundle(context_bundle: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(context_bundle, dict):
@@ -113,7 +115,11 @@ def format_asset_graph_prompt_lines(asset_graph_context: dict[str, Any] | None, 
         label = str(asset.get("label") or asset.get("graph_asset_id") or "asset")
         graph_asset_id = str(asset.get("graph_asset_id") or asset.get("asset_id") or "")
         kind = "/".join(part for part in (str(asset.get("asset_type") or ""), str(asset.get("role") or "")) if part)
-        locks = "; ".join(_strings(asset.get("continuity_locks"), limit=4)) or "identity, layout, material"
+        rendered = render_asset_prompt_line(asset, max_facts=6)
+        if rendered:
+            lines.append(f"- {graph_asset_id} {rendered}")
+            continue
+        locks = "; ".join(_strings(asset.get("continuity_locks"), limit=4)) or "approved visual facts"
         avoids = "; ".join(_strings(asset.get("negative_locks"), limit=3)) or "unrequested changes"
         lines.append(f"- {graph_asset_id} {label} ({kind}): lock {locks}; avoid {avoids}")
     unsupported = _list(asset_graph_context.get("unsupported_additions"))
@@ -278,18 +284,36 @@ def _normalize_existing_summary(summary: dict[str, Any], *, max_assets: int) -> 
 
 
 def _summarize_asset(asset: dict[str, Any]) -> dict[str, Any]:
+    asset_type = str(asset.get("asset_type") or "asset")
+    label = str(asset.get("label") or asset.get("title") or "")
+    evidence = _evidence_text(asset)
+    profile = asset.get("asset_fact_profile") if isinstance(asset.get("asset_fact_profile"), dict) else {}
+    if not profile:
+        profile = build_asset_fact_profile(
+            asset_type=asset_type,
+            label=label,
+            evidence_text=evidence,
+            source_text=str(asset.get("descriptive_signature") or asset.get("signature") or ""),
+        )
+    facts = asset.get("facts") if isinstance(asset.get("facts"), dict) else profile.get("facts")
+    continuity = _strings(asset.get("continuity_locks"), limit=8) or _strings(profile.get("continuity_locks"), limit=8)
+    negative = _strings(asset.get("negative_locks"), limit=8) or _strings(profile.get("negative_locks"), limit=8)
     return {
         "graph_asset_id": str(asset.get("graph_asset_id") or asset.get("asset_id") or ""),
         "asset_id": str(asset.get("asset_id") or asset.get("graph_asset_id") or ""),
-        "asset_type": str(asset.get("asset_type") or "asset"),
-        "label": str(asset.get("label") or asset.get("title") or ""),
+        "asset_type": asset_type,
+        "character_subtype": str(asset.get("character_subtype") or profile.get("character_subtype") or ""),
+        "label": label,
         "role": str(asset.get("role") or asset.get("asset_type") or "asset"),
         "status": str(asset.get("status") or asset.get("review_state") or "candidate"),
         "confidence": _confidence(asset.get("confidence")),
         "shot_refs": _strings(asset.get("shot_refs"), limit=8),
-        "evidence_text": _evidence_text(asset),
-        "continuity_locks": _strings(asset.get("continuity_locks"), limit=8),
-        "negative_locks": _strings(asset.get("negative_locks"), limit=8),
+        "evidence_text": evidence,
+        "facts": facts if isinstance(facts, dict) else {},
+        "fact_evidence": _strings(asset.get("fact_evidence") or profile.get("fact_evidence"), limit=6),
+        "missing_fact_fields": _strings(asset.get("missing_fact_fields") or profile.get("missing_fact_fields"), limit=8),
+        "continuity_locks": continuity,
+        "negative_locks": negative,
     }
 
 

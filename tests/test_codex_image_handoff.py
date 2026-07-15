@@ -221,7 +221,7 @@ def test_codex_image_handoff_runtime_poll_recovers_terminal_failed_state_after_w
     submit = _submit_keyframe_with_preflight(client, project_id, request)
     assert submit.status_code == 200
     job_id = submit.json()["job"]["job_id"]
-    output_dir = tmp_path / "runs" / project_id / job_id
+    output_dir = RuntimeStore(tmp_path).run_dir(project_id, job_id)
     pending = client.post(f"/projects/{project_id}/keyframe-generations/{job_id}/poll")
     assert pending.status_code == 200
     assert pending.json()["job"]["status"] == "pending"

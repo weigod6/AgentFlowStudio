@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from agentflow.algorithms.asset_facts import render_asset_prompt_line
+
 
 def provider_prompt_from_bundle(bundle: dict[str, Any]) -> str:
     text = bundle.get("text_channel") if isinstance(bundle.get("text_channel"), dict) else {}
@@ -47,13 +49,15 @@ def text_channel(
                 identity_lines.append(line)
             continue
         card = asset.get("feature_card") if isinstance(asset.get("feature_card"), dict) else {}
-        card_text = "; ".join(f"{key}: {value}" for key, value in card.items())
         locks = [
             lock
             for lock in asset.get("negative_locks", [])
             if (str(asset.get("asset_id")), str(lock)) not in overrides
         ]
-        line = f"{asset.get('label')}: {asset.get('signature')}. {card_text}. Locks: {'; '.join(locks)}".strip()
+        line = render_asset_prompt_line({**asset, "negative_locks": locks}, negative_locks=locks)
+        if "证据事实" not in line:
+            card_text = _provider_safe_feature_card_text(card)
+            line = f"{asset.get('label')}: {asset.get('signature')}. {card_text}. Locks: {'; '.join(locks)}".strip()
         if asset.get("asset_type") == "scene":
             scene_lines.append(line)
         else:
@@ -102,6 +106,19 @@ def _director_lines(director_compile: dict[str, Any] | None) -> list[str]:
         if title and text:
             lines.append(f"{title}: {text}")
     return lines
+
+
+def _provider_safe_feature_card_text(card: dict[str, Any]) -> str:
+    parts: list[str] = []
+    placeholder_terms = ("待确认", "后续可人工补充", "根据分镜", "pending human confirmation", "pending confirmation")
+    for key, value in card.items():
+        text = str(value or "").strip()
+        if not text:
+            continue
+        if any(term in text for term in placeholder_terms):
+            continue
+        parts.append(f"{key}: {text}")
+    return "; ".join(parts)
 
 
 __all__ = (

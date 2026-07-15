@@ -191,7 +191,7 @@ def build_prompt_optimization(
         signature_segment = str(context_bundle.get("text_channel", {}).get("asset_signature_segment") or "")
         if signature_segment:
             assembled_prompt = f"{assembled_prompt}\nAsset Signatures:\n{signature_segment}"
-            user_prompt = f"{user_prompt}\n璧勪骇绛惧悕锛歕n{signature_segment}"
+            user_prompt = f"{user_prompt}\n资产签名：\n{signature_segment}"
             user_prompt_plain = "\n".join(part for part in (user_prompt_plain, signature_segment) if part)
     _log_prompt_step("asset_signatures_checked", started, log_context, context_bundle_present=bool(context_bundle))
     step_started = time.perf_counter()
