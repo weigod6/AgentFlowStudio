@@ -22,7 +22,7 @@ export function handleCanvasNodeClick(store, runtime, e) {
     void handleCandidateCreatorAction(store, runtime, node, actionEl);
   } else if (action === "production-quality-approve" || action === "production-export" || action === "production-delivery-refresh") {
     void handleProductionDeliveryAction(store, runtime, node, actionEl);
-  } else if (action === "intent") handleNodeIntent(store, node, actionEl.dataset.intent);
+  } else if (action === "intent") handleNodeIntent(store, runtime, node, actionEl.dataset.intent);
   else if (action === "open-director") openDirectorShell(store, node);
   else if (action === "asset-detail") openAssetDetailPopover(store, runtime, assetRefForAction(node, actionEl.dataset.assetId), actionEl);
   else if (["text", "script"].includes(node.type) && action === "upload") importScriptFileIntoTextNode(store, node);

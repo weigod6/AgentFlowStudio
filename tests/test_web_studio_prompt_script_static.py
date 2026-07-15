@@ -1369,6 +1369,8 @@ process.stdout.write(JSON.stringify({
 def test_storyboard_asset_identification_uses_runtime_plan_and_allows_manual_asset_nodes() -> None:
     runtime_client = (STUDIO_ROOT / "src" / "runtime-client.js").read_text(encoding="utf-8")
     storyboard_actions = (STUDIO_ROOT / "src" / "storyboard-node-actions.js").read_text(encoding="utf-8")
+    canvas_action_handler = (STUDIO_ROOT / "src" / "canvas-node-action-handler.js").read_text(encoding="utf-8")
+    node_actions = (STUDIO_ROOT / "src" / "node-actions.js").read_text(encoding="utf-8")
     asset_nodes = (STUDIO_ROOT / "src" / "shot-asset-nodes.js").read_text(encoding="utf-8")
     node_menu = (STUDIO_ROOT / "src" / "panels" / "node-menu.js").read_text(encoding="utf-8")
     add_asset_modal = (STUDIO_ROOT / "src" / "panels" / "add-asset-modal.js").read_text(encoding="utf-8")
@@ -1377,6 +1379,9 @@ def test_storyboard_asset_identification_uses_runtime_plan_and_allows_manual_ass
     assert "shot-asset-plans" in runtime_client
     assert "identifyScriptAssets(store, runtime, node)" in storyboard_actions
     assert "runtime?.planShotAssets" in storyboard_actions
+    assert "handleNodeIntent(store, runtime, node, actionEl.dataset.intent)" in canvas_action_handler
+    assert "identifyScriptAssets(store, runtime, node)" in node_actions
+    assert "identifyScriptAssets(store, null, node)" not in node_actions
     assert "createManualShotAssetNode" in asset_nodes
     assert "openAddAssetModal" in node_menu
     assert "新增资产" in node_menu
