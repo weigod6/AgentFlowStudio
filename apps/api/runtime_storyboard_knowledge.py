@@ -41,6 +41,8 @@ def storyboard_instruction(request: StoryboardBreakdownRequest, storyboard_knowl
             "camera_motion 使用中文运镜词，例如：固定机位、手持轻晃、缓慢推近、向上摇镜。",
             "source_span 必须包含 span_id 与 text，text 必须逐字来自剧本原文；不能为镜头效果擅自新增人物、道具、家具、屋檐或场景结构。",
             "unsupported_additions 必须列出所有剧本未提供但你认为需要补入的内容；正常情况下应为空数组，不能静默添加。",
+            "description 与 asset_refs 只能使用剧本已经出现或可由 source_span 直接支持的人物、动物、场景、道具和数量关系；不要给未命名角色擅自取名。",
+            "如果剧本没有出现某个具体道具、角色名、额外人数/动物数量或场景结构，不要把它写进 description，也不要写进 asset_refs。",
             "asset_refs 每项必须包含 label, asset_type(character|scene), status, source, evidence_text, confidence。默认只识别可复用人物与场景资产；道具不自动建资产，除非用户后续手动新增。",
             "不要用泛化的“主角”“主要场景”替代剧本里的真实名称；例如孙悟空、猪八戒、金刚狼必须分别作为 character；云栈洞口、山巅石台战场等必须作为 scene。",
             "每个镜头要包含时长、画面描述、景别、光影氛围、运镜、对白/旁白、音效。",

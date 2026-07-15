@@ -239,6 +239,34 @@ def test_storyboard_provider_parser_preserves_allowed_numeric_units_and_formats(
     assert shots[0]["description"] == description
 
 
+def test_storyboard_provider_parser_rejects_unmentioned_assets_props_and_counts() -> None:
+    source_script = "小明有一只猫，小猫捡到了一只狗。"
+    payload = {
+        "shots": [
+            {
+                "shot_id": "shot_01",
+                "index": 1,
+                "duration": "3.2s",
+                "description": "@小明 @煤球 @老城区巷口。小明蹲在老城区巷口，专注晃动旧毛线团；三人一猫影子细长交叠。",
+                "shot_size": "中景",
+                "light_atmosphere": "暖调斜阳",
+                "camera_motion": "缓慢横移",
+                "dialogue": "无明确对白",
+                "sound": "低频蝉鸣持续",
+                "source_span": {"text": source_script},
+                "asset_refs": [
+                    {"label": "小明", "asset_type": "character", "status": "mentioned", "source": "explicit"},
+                    {"label": "煤球", "asset_type": "character", "status": "mentioned", "source": "explicit"},
+                    {"label": "老城区巷口", "asset_type": "scene", "status": "mentioned", "source": "explicit"},
+                ],
+            }
+        ]
+    }
+
+    with pytest.raises(ValueError, match="unsupported source additions"):
+        shots_from_provider_text(json.dumps(payload, ensure_ascii=False), source_script_text=source_script)
+
+
 def test_storyboard_provider_parser_preserves_source_script_english() -> None:
     source_script = "Bob把AI camera放在厨房桌面上，随后说AI camera ready。"
     payload = {

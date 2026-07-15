@@ -577,6 +577,7 @@ process.stdout.write(JSON.stringify({ textRendered, imageRendered }));
 def test_text_node_has_script_import_expand_and_breakdown_controls() -> None:
     prompt_bar = (STUDIO_ROOT / "src" / "prompt-bar.js").read_text(encoding="utf-8")
     canvas_action_handler = (STUDIO_ROOT / "src" / "canvas-node-action-handler.js").read_text(encoding="utf-8")
+    node_actions = (STUDIO_ROOT / "src" / "node-actions.js").read_text(encoding="utf-8")
     script_breakdown = (STUDIO_ROOT / "src" / "script-breakdown.js").read_text(encoding="utf-8")
     script_file_import = (STUDIO_ROOT / "src" / "script-file-import.js").read_text(encoding="utf-8")
     nodes = (STUDIO_ROOT / "src" / "nodes.js").read_text(encoding="utf-8")
@@ -600,6 +601,63 @@ def test_text_node_has_script_import_expand_and_breakdown_controls() -> None:
     assert 'createNode(store, "script"' in script_breakdown
     assert "connect(store, fresh.id, shotNode.id)" in script_breakdown
     assert "剧本拆分分镜" in nodes
+    assert "splitTextNodeToStoryboardNodes(store, node, runtime)" in node_actions
+
+
+def test_storyboard_breakdown_runtime_failure_is_visible_not_local_fallback() -> None:
+    script = r'''
+import { splitTextNodeToStoryboardNodes } from "./apps/studio/src/script-breakdown.js";
+
+const state = {
+  nodes: {
+    text_1: {
+      id: "text_1",
+      type: "text",
+      prompt: "小明有一只猫，小猫捡到了一只狗。",
+      content: "小明有一只猫，小猫捡到了一只狗。",
+      params: {},
+      status: "complete",
+      x: 0,
+      y: 0,
+      w: 280,
+      h: 280,
+    },
+  },
+  edges: {},
+  order: ["text_1"],
+  assets: [],
+  groups: {},
+  selection: { nodeIds: ["text_1"], edgeId: null },
+  ui: {},
+};
+const store = {
+  get: () => state,
+  set: (mutator) => mutator(state),
+  nextId: (prefix) => `${prefix}_${Object.keys(state.nodes).length + 1}`,
+};
+const runtime = {
+  breakdownStoryboard: async () => {
+    throw new Error("Runtime request failed (422): provider output rejected");
+  },
+};
+const created = await splitTextNodeToStoryboardNodes(store, state.nodes.text_1, runtime);
+process.stdout.write(JSON.stringify({ created, node: state.nodes.text_1, node_count: Object.keys(state.nodes).length }));
+'''
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    payload = json.loads(completed.stdout)
+
+    assert payload["created"] == []
+    assert payload["node_count"] == 1
+    assert payload["node"]["status"] == "error"
+    assert payload["node"]["params"]["storyboardBreakdownState"]["status"] == "failed"
+    assert payload["node"]["params"]["generationPolicyStatus"] == "needs_attention"
+    assert "小明有一只猫" in payload["node"]["prompt"]
 
 
 def test_idea_expansion_fallback_outputs_formal_script_not_storyboard_template() -> None:

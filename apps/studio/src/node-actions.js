@@ -33,8 +33,11 @@ export function handleNodeIntent(store, runtime, node, intent) {
     return;
   }
   if (node.type === "text" && intent === "剧本拆分分镜") {
-    splitTextNodeToStoryboardNodes(store, node).then((created) => {
-      if (!created.length) setNodeError(store, node.id, "请先输入或导入完整剧本，再拆分分镜。");
+    splitTextNodeToStoryboardNodes(store, node, runtime).then((created) => {
+      const current = store.get().nodes[node.id];
+      if (!created.length && current?.params?.storyboardBreakdownState?.status !== "failed") {
+        setNodeError(store, node.id, "请先输入或导入完整剧本，再拆分分镜。");
+      }
     });
     return;
   }

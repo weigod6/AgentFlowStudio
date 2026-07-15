@@ -336,8 +336,11 @@ async function loadStoryboardBreakdown(store, runtime, node, source) {
           artifacts: payload?.artifacts || {},
         };
       }
+      setStoryboardBreakdownError(store, node.id, new Error("分镜拆解服务未返回可用分镜。"));
+      return { shots: [], mode: "runtime_failed", provider_calls_started: Boolean(payload?.provider_calls_started) };
     } catch (error) {
-      setStoryboardBreakdownState(store, node.id, "fallback", safeBreakdownError(error));
+      setStoryboardBreakdownError(store, node.id, error);
+      return { shots: [], mode: "runtime_failed", provider_calls_started: false };
     }
   }
   return {
@@ -471,6 +474,26 @@ function setStoryboardBreakdownState(store, nodeId, status, message = "") {
   }, { history: false, persist: false });
 }
 
+function setStoryboardBreakdownError(store, nodeId, error) {
+  const message = formatRuntimeError(error, "分镜拆解失败，请检查生成服务配置或稍后重试。");
+  store.set((s) => {
+    const node = s.nodes[nodeId];
+    if (!node) return;
+    node.status = "error";
+    node.params.storyboardBreakdownState = {
+      status: "failed",
+      percent: 100,
+      label: "分镜拆解",
+      message,
+      completed_at: new Date().toISOString(),
+    };
+    node.params.generationPolicyStatus = "needs_attention";
+    node.params.generationStatusDetail = "分镜拆解未完成。";
+    node.params.generationBlockedReason = message;
+    node.params.generationNextAction = "确认 Runtime 分镜拆解服务可用后重试。";
+  });
+}
+
 function setScriptImportError(store, nodeId, message) {
   store.set((s) => {
     const node = s.nodes[nodeId];
@@ -483,11 +506,6 @@ function setScriptImportError(store, nodeId, message) {
       completed_at: new Date().toISOString(),
     };
   }, { history: false });
-}
-
-function safeBreakdownError(error) {
-  const message = error instanceof Error ? error.message : String(error || "");
-  return message.replace(/Bearer\s+\S+/gi, "Bearer <redacted>").slice(0, 120);
 }
 
 function cleanSegment(value) {

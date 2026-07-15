@@ -412,7 +412,7 @@ def test_storyboard_breakdown_accepts_llm_json_with_markdown_and_trailing_text(t
     assert payload["shots"][0]["asset_refs"][1]["asset_type"] == "scene"
 
 
-def test_storyboard_provider_parser_marks_unrequested_set_pieces_for_review(tmp_path, monkeypatch) -> None:
+def test_storyboard_provider_parser_discards_unrequested_set_pieces(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("AFS_ALLOW_REMOTE_LLM", "true")
 
     class Descriptor:
@@ -471,15 +471,81 @@ def test_storyboard_provider_parser_marks_unrequested_set_pieces_for_review(tmp_
     )
 
     assert response.status_code == 200
-    shot = response.json()["shots"][0]
-    assert shot["grounding_status"] == "needs_review_unsupported_addition"
-    assert "木椅" in shot["unsupported_additions"]
-    assert "屋檐" in shot["unsupported_additions"]
-    assert shot["source_span"]["text"] == "未来机器人站在农村屋顶仰望星空。"
-    graph = response.json()["asset_graph"]
-    assert {"shot_id": "shot_01", "addition": "木椅"} in [
-        {"shot_id": item["shot_id"], "addition": item["addition"]} for item in graph["unsupported_additions"]
-    ]
+    payload = response.json()
+    shots_serialized = json.dumps(payload["shots"], ensure_ascii=False)
+    assert payload["provider_calls_started"] is True
+    assert payload["safe_manifest"]["status"] == "local_fallback"
+    assert "unsupported source additions" in payload["safe_manifest"]["discard_reason"]
+    assert "木椅" not in shots_serialized
+    assert "屋檐从画面右侧压下来" not in shots_serialized
+
+
+def test_storyboard_breakdown_discards_provider_storyboard_with_hallucinated_story_facts(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AFS_ALLOW_REMOTE_LLM", "true")
+    source_script = "小明有一只猫，小猫捡到了一只狗。"
+
+    class Descriptor:
+        modality = "llm"
+
+    class FakeRegistry:
+        _descriptors = {"prompt_optimizer": Descriptor()}
+
+        def dispatch(self, capability, service_id, request):
+            assert capability == "llm"
+            assert service_id == "prompt_optimizer"
+            return {
+                "text": json.dumps(
+                    {
+                        "shots": [
+                            {
+                                "shot_id": "shot_01",
+                                "index": 1,
+                                "duration": "3.2s",
+                                "description": "@小明 @煤球 @老城区巷口。小明蹲在老城区巷口，专注晃动旧毛线团；三人一猫影子细长交叠。",
+                                "shot_size": "中景",
+                                "light_atmosphere": "暖调斜阳",
+                                "camera_motion": "缓慢横移",
+                                "dialogue": "无明确对白",
+                                "sound": "低频蝉鸣持续",
+                                "source_span": {"text": source_script},
+                                "asset_refs": [
+                                    {"label": "小明", "asset_type": "character", "status": "mentioned", "source": "explicit"},
+                                    {"label": "煤球", "asset_type": "character", "status": "mentioned", "source": "explicit"},
+                                    {"label": "老城区巷口", "asset_type": "scene", "status": "mentioned", "source": "explicit"},
+                                ],
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                "provider_calls_started": True,
+            }
+
+    monkeypatch.setattr("apps.api.runtime_storyboard_breakdown.load_provider_registry", lambda: FakeRegistry())
+    client = TestClient(create_runtime_app(runtime_root=tmp_path))
+    client.post("/projects", json={"project_id": "proj_sb_hallucinated_facts", "goal": "Ground storyboard output"})
+
+    response = client.post(
+        "/projects/proj_sb_hallucinated_facts/storyboard-breakdowns",
+        json={
+            "node_id": "text_001",
+            "script_text": source_script,
+            "target_platform": "short_video",
+            "style": "cinematic",
+            "node_parameters": {"llm_provider": "prompt_optimizer"},
+            "generated_at": "2026-07-15T10:06:00+08:00",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    shots_serialized = json.dumps(payload["shots"], ensure_ascii=False)
+    assert payload["provider_calls_started"] is True
+    assert payload["safe_manifest"]["status"] == "local_fallback"
+    assert "unsupported source additions" in payload["safe_manifest"]["discard_reason"]
+    assert "煤球" not in shots_serialized
+    assert "毛线团" not in shots_serialized
+    assert "三人一猫" not in shots_serialized
 
 
 def test_storyboard_breakdown_keeps_provider_started_when_llm_json_is_discarded(tmp_path, monkeypatch) -> None:

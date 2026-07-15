@@ -98,7 +98,11 @@ def _normalize_provider_shot(item: Any, index: int, *, source_script_text: str =
     else:
         refs = fallback["asset_refs"]
         dropped_refs = list(fallback.get("dropped_asset_ref_diagnostics") or [])
-    unsupported = unsupported_additions_for_description(description, source_span["text"])
+    grounding_source = "\n".join(part for part in (source_script_text, source_span["text"]) if part)
+    unsupported = [
+        *unsupported_additions_for_description(description, grounding_source),
+        *_provider_declared_unsupported(item.get("unsupported_additions")),
+    ]
     return {
         **fallback,
         "shot_id": str(item.get("shot_id") or fallback["shot_id"]),
@@ -157,6 +161,9 @@ def _overlap_score(left: str, right: str) -> int:
 
 
 def _validate_provider_shots(shots: list[dict[str, Any]], source_script_text: str) -> None:
+    _validate_source_grounding(shots, source_script_text)
+    _validate_asset_ref_grounding(shots, source_script_text)
+    _validate_no_unsupported_additions(shots)
     source_len = len("".join(str(source_script_text or "").split()))
     if source_len < 120:
         return
@@ -178,6 +185,46 @@ def _validate_provider_shots(shots: list[dict[str, Any]], source_script_text: st
 def _descriptive_text(value: Any) -> str:
     text = re.sub(r"@[\w\u4e00-\u9fff-]+", "", str(value or ""))
     return "".join(char for char in text if not char.isspace() and char not in "，。,.；;：:、")
+
+
+def _provider_declared_unsupported(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [_clean(item)[:80] for item in value if _clean(item)]
+    if _clean(value):
+        return [_clean(value)[:80]]
+    return []
+
+
+def _validate_source_grounding(shots: list[dict[str, Any]], source_script_text: str) -> None:
+    if not _clean(source_script_text):
+        return
+    for shot in shots:
+        span = shot.get("source_span") if isinstance(shot, dict) else {}
+        if not isinstance(span, dict) or span.get("grounding_status") != "source_grounded":
+            raise ValueError("provider storyboard response has ungrounded source_span")
+
+
+def _validate_asset_ref_grounding(shots: list[dict[str, Any]], source_script_text: str) -> None:
+    source = _clean(source_script_text)
+    generic = {"主角", "角色", "人物", "主体", "主要场景", "场景"}
+    for shot in shots:
+        for ref in shot.get("asset_refs") or []:
+            label = _clean(ref.get("label") or ref.get("display_name") or "")
+            if not label or label in generic or label in source or ref.get("provisional_name"):
+                continue
+            asset_type = str(ref.get("asset_type") or "")
+            description = str(shot.get("description") or "")
+            if asset_type == "character" or (asset_type == "scene" and f"@{label}" in description and len(label) >= 3):
+                raise ValueError(f"provider storyboard response has unsupported source additions: @{label}")
+
+
+def _validate_no_unsupported_additions(shots: list[dict[str, Any]]) -> None:
+    additions: list[str] = []
+    for shot in shots:
+        additions.extend(str(item) for item in (shot.get("unsupported_additions") or []) if str(item).strip())
+    if additions:
+        preview = ", ".join(additions[:5])
+        raise ValueError(f"provider storyboard response has unsupported source additions: {preview}")
 
 
 __all__ = ("shots_from_provider_text",)

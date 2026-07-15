@@ -225,7 +225,10 @@ function buildBottomRow(store, runtime, node, textarea) {
     row.appendChild(textAction("sparkles", "扩写剧本", () => expandTextIdeaToScript(store, runtime, node, textarea)));
     row.appendChild(textAction("frames", "拆分分镜", () => {
       splitTextNodeToStoryboardNodes(store, node, runtime).then((created) => {
-        if (!created.length) flashTooltip(textarea, "先输入或导入剧本");
+        const current = store.get().nodes[node.id];
+        if (!created.length && current?.params?.storyboardBreakdownState?.status !== "failed") {
+          flashTooltip(textarea, "先输入或导入剧本");
+        }
       });
     }));
   }
