@@ -161,6 +161,29 @@ def test_storyboard_local_fallback_still_recognizes_mountain_battlefield() -> No
     assert ("山巅石台战场", "scene") in refs
 
 
+def test_storyboard_local_fallback_does_not_fabricate_generic_people_or_mountain_scene_for_ancient_battlefield() -> None:
+    script = (
+        "《断戟惊雷》\n"
+        "暴雨如注，古战场泥泞翻涌。沈砚单膝陷在泥中，右臂青筋暴起，死攥半截断戟，指节泛白如骨；"
+        "左肩甲裂开一道焦痕，血混着雨水蜿蜒淌进衣领褶皱深处。他抬头刹那，残旗在狂风中撕扯拍打。\n"
+        "远处焦黑城墙被惨白雷光劈亮，砖石崩塌的轮廓在电光中一闪而逝。沈砚瞳孔骤缩："
+        "城垛缺口处，一袭素白衣影静立如碑，未持兵刃，只捧一卷湿透竹简。\n"
+        "他喉结剧烈滚动，下颌绷紧欲吼，却只呛出一口黑血——血色浓稠发暗，顺下颌滴入泥水，"
+        "漾开蛛网状墨痕。这不是新伤，是三年前那杯毒酒终于蚀穿肝胆的证印。"
+    )
+
+    shots = local_storyboard_shots(script)
+    serialized = json.dumps(shots, ensure_ascii=False)
+    refs = {(ref["label"], ref["asset_type"]) for shot in shots for ref in shot["asset_refs"]}
+
+    assert "可见人物" not in serialized
+    assert "山巅石台战场" not in serialized
+    assert "@可见人物" not in serialized
+    assert "@山巅石台战场" not in serialized
+    assert ("古战场", "scene") in refs
+    assert all(not str(shot["description"]).startswith("@") for shot in shots)
+
+
 def test_storyboard_breakdown_returns_asset_graph_with_cross_shot_evidence(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("AFS_ALLOW_REMOTE_LLM", raising=False)
     client = TestClient(create_runtime_app(runtime_root=tmp_path))

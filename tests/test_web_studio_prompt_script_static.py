@@ -1444,6 +1444,35 @@ process.stdout.write(JSON.stringify({ shot, text: structuredShotText(shot) }));
     assert ("老城区巷口", "scene") in refs
 
 
+def test_frontend_structured_shot_does_not_fabricate_generic_assets_for_ancient_battlefield() -> None:
+    script = r'''
+import { structuredShotFromSegment, structuredShotText } from "./apps/studio/src/structured-shot.js";
+
+const shot = structuredShotFromSegment(
+  "《断戟惊雷》暴雨如注，古战场泥泞翻涌。沈砚单膝陷在泥中，右臂青筋暴起，死攥半截断戟，指节泛白如骨。",
+  1,
+);
+process.stdout.write(JSON.stringify({ shot, text: structuredShotText(shot) }));
+'''
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    payload = json.loads(completed.stdout)
+    refs = {(item["label"], item["asset_type"]) for item in payload["shot"]["asset_refs"]}
+    surface = json.dumps(payload, ensure_ascii=False)
+
+    assert "可见人物" not in surface
+    assert "山巅石台战场" not in surface
+    assert "@可见人物" not in surface
+    assert "@山巅石台战场" not in surface
+    assert ("古战场", "scene") in refs
+    assert not payload["shot"]["description"].startswith("@")
+
+
 def test_storyboard_asset_recognition_prioritizes_principal_characters_and_manual_props() -> None:
     script = r'''
 import { structuredShotFromSegment } from "./apps/studio/src/structured-shot.js";

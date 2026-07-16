@@ -219,13 +219,12 @@ def _asset_refs(text: str) -> list[dict[str, Any]]:
             )
     if not any(ref["asset_type"] == "character" for ref in refs) and any(hint in text for hint in CHARACTER_HINTS):
         label = _infer_character_label(text) or "主角"
-        _push_ref(refs, label, "character", "candidate", text, character_subtype=_character_subtype_for_label(label, text))
+        if label not in GENERIC_CHARACTER_LABELS:
+            _push_ref(refs, label, "character", "candidate", text, character_subtype=_character_subtype_for_label(label, text))
     if not any(ref["asset_type"] == "scene" for ref in refs) and any(hint in text for hint in SCENE_HINTS):
-        _push_ref(refs, _infer_scene_label(text) or "主要场景", "scene", "candidate", text)
-    if not refs:
-        label = _infer_character_label(text) or "主角"
-        _push_ref(refs, label, "character", "candidate", text, character_subtype=_character_subtype_for_label(label, text))
-        _push_ref(refs, _infer_scene_label(text) or "主要场景", "scene", "candidate", text)
+        label = _infer_scene_label(text)
+        if label and label not in GENERIC_SCENE_LABELS:
+            _push_ref(refs, label, "scene", "candidate", text)
     return refs
 
 
@@ -259,10 +258,7 @@ def _push_ref(
 
 
 def _description_with_assets(source: str, refs: list[dict[str, Any]]) -> str:
-    visible_source = _replace_generic_asset_tokens(source, refs)
-    missing = [ref for ref in refs if f"@{ref['label']}" not in visible_source]
-    prefix = " ".join(f"@{ref['label']}" for ref in missing)
-    return f"{prefix}。{visible_source}" if prefix else visible_source
+    return _replace_generic_asset_tokens(source, refs)
 
 
 def _replace_generic_asset_tokens(source: str, refs: list[dict[str, Any]]) -> str:
@@ -479,13 +475,17 @@ def _infer_scene_label(text: str) -> str:
         return "海边"
     if "餐厅" in source:
         return "餐厅"
+    if "古战场" in source:
+        return "古战场"
+    if "战场" in source:
+        return "战场"
     if _looks_like_mountain_battle_scene(source):
         return "山巅石台战场"
     return ""
 
 
 def _looks_like_mountain_battle_scene(source: str) -> bool:
-    if re.search(r"山巅|山脊|云海|战场", source):
+    if re.search(r"山巅|山脊|云海", source):
         return True
     return bool("石台" in source and re.search(r"山|峰|云|战|大战|对决|破碎", source))
 

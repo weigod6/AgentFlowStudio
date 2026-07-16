@@ -198,14 +198,12 @@ function addImplicitRefs(refs, text) {
     pushAssetRef(refs, label, "character", "candidate", text);
   }
   if (!hasCharacter && CHARACTER_HINTS.some((hint) => text.includes(hint))) {
-    pushAssetRef(refs, inferCharacterLabel(text) || "主角", "character", "candidate", text);
+    const label = inferCharacterLabel(text);
+    if (label && !GENERIC_CHARACTER_LABELS.has(label)) pushAssetRef(refs, label, "character", "candidate", text);
   }
   if (!hasScene && SCENE_HINTS.some((hint) => text.includes(hint))) {
-    pushAssetRef(refs, inferSceneLabel(text) || "主要场景", "scene", "candidate", text);
-  }
-  if (!refs.length) {
-    pushAssetRef(refs, inferCharacterLabel(text) || "主角", "character", "candidate", text);
-    pushAssetRef(refs, inferSceneLabel(text) || "主要场景", "scene", "candidate", text);
+    const label = inferSceneLabel(text);
+    if (label && !GENERIC_SCENE_LABELS.has(label)) pushAssetRef(refs, label, "scene", "candidate", text);
   }
 }
 
@@ -225,10 +223,7 @@ function pushAssetRef(refs, label, assetType, source, context = "", options = {}
 }
 
 function descriptionWithAssets(source, assetRefs) {
-  const visibleSource = replaceGenericAssetTokens(String(source || ""), assetRefs);
-  const missing = assetRefs.filter((asset) => !visibleSource.includes(assetRefToken(asset)));
-  const prefix = missing.length ? `${missing.map(assetRefToken).join(" ")}。` : "";
-  return `${prefix}${visibleSource}`;
+  return replaceGenericAssetTokens(String(source || ""), assetRefs);
 }
 
 function replaceGenericAssetTokens(source, assetRefs) {
@@ -298,12 +293,14 @@ function inferSceneLabel(text) {
   if (isCity) return "城市场景";
   if (/云栈洞口|洞口|洞内|山洞/.test(source)) return source.includes("云栈") ? "云栈洞口" : "山洞场景";
   if (/老城区巷口|巷口|窄巷|巷子|青石台阶|青砖/.test(source)) return /老城区|巷口/.test(source) ? "老城区巷口" : "巷道空间";
+  if (source.includes("古战场")) return "古战场";
+  if (source.includes("战场")) return "战场";
   if (looksLikeMountainBattleScene(source)) return "山巅石台战场";
   return "";
 }
 
 function looksLikeMountainBattleScene(source) {
-  if (/山巅|山脊|云海|战场/.test(source)) return true;
+  if (/山巅|山脊|云海/.test(source)) return true;
   return source.includes("石台") && /山|峰|云|战|大战|对决|破碎/.test(source);
 }
 
