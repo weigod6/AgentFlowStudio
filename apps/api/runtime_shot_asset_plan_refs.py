@@ -28,6 +28,8 @@ PRESERVED_REF_FIELDS = {
     "role_in_shot",
     "provider_asset_contract",
 }
+DOG_TERMS = ("拉布拉多", "金毛", "边牧", "柯基", "哈士奇", "柴犬", "奶狗", "幼犬", "小狗", "狗狗", "狗", "犬")
+CAT_TERMS = ("橘猫", "狸花猫", "黑猫", "白猫", "小猫", "猫咪", "猫")
 
 
 def source_text(request: ShotAssetPlanRequest) -> str:
@@ -67,6 +69,28 @@ def finalize_asset_refs(refs: list[dict[str, Any]], text: str) -> list[dict[str,
     return [_with_evidence(ref, text) for ref in refs]
 
 
+def merge_asset_refs(primary: list[dict[str, Any]], supplemental: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    positions: dict[tuple[str, str], int] = {}
+    for ref in [*primary, *supplemental]:
+        asset_type = str(ref.get("asset_type") or "")
+        label = str(ref.get("label") or ref.get("display_name") or "").strip()
+        if asset_type not in {"character", "scene", "prop"} or not label:
+            continue
+        key = (asset_type, label)
+        if key in positions:
+            existing = result[positions[key]]
+            for field in PRESERVED_REF_FIELDS:
+                if not existing.get(field) and ref.get(field):
+                    existing[field] = ref[field]
+            if not existing.get("evidence_text") and ref.get("evidence_text"):
+                existing["evidence_text"] = ref["evidence_text"]
+            continue
+        positions[key] = len(result)
+        result.append(ref)
+    return result
+
+
 def graph_shot(
     shot: dict[str, Any],
     inferred_shot: dict[str, Any],
@@ -94,13 +118,50 @@ def _apply_global_context(refs: list[dict[str, Any]], script_text: str, shot_tex
     global_refs: list[dict[str, Any]] = []
     for shot in local_storyboard_shots(combined):
         global_refs.extend(_normalized_refs(shot.get("asset_refs"), combined))
+    animal_refs = [ref for ref in global_refs if _is_animal_ref(ref)]
     if not any(ref.get("asset_type") == "character" for ref in refs):
         refs.extend(ref for ref in global_refs if ref.get("asset_type") == "character")
+    elif _mentions_animal_coreference(shot_text) and not any(_is_animal_ref(ref) for ref in refs):
+        refs.extend(_matching_animal_refs(animal_refs, shot_text))
     if not any(ref.get("asset_type") == "scene" for ref in refs):
         refs.extend(ref for ref in global_refs if ref.get("asset_type") == "scene")
     if not any(ref.get("asset_type") == "prop" for ref in refs):
         refs.extend(ref for ref in global_refs if ref.get("asset_type") == "prop")
     return refs
+
+
+def _matching_animal_refs(refs: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:
+    if _contains_any(text, DOG_TERMS):
+        matched = [ref for ref in refs if _contains_any(_ref_text(ref), DOG_TERMS)]
+        if matched:
+            return matched[:2]
+    if _contains_any(text, CAT_TERMS):
+        matched = [ref for ref in refs if _contains_any(_ref_text(ref), CAT_TERMS)]
+        if matched:
+            return matched[:2]
+    return refs[:1]
+
+
+def _mentions_animal_coreference(text: str) -> bool:
+    return _contains_any(text, (*DOG_TERMS, *CAT_TERMS, "它", "尾巴", "爪", "鼻尖", "耳朵", "叼", "吐在"))
+
+
+def _is_animal_ref(ref: dict[str, Any]) -> bool:
+    if str(ref.get("asset_type") or "") != "character":
+        return False
+    if str(ref.get("character_subtype") or "") == "animal":
+        return True
+    label_text = " ".join(str(ref.get(key) or "") for key in ("label", "display_name"))
+    return _contains_any(label_text, (*DOG_TERMS, *CAT_TERMS))
+
+
+def _ref_text(ref: dict[str, Any]) -> str:
+    return " ".join(str(ref.get(key) or "") for key in ("label", "display_name", "evidence_text", "descriptive_signature"))
+
+
+def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
+    source = str(text or "").casefold()
+    return any(term.casefold() in source for term in terms)
 
 
 def _normalized_refs(items: Any, context: str) -> list[dict[str, Any]]:
@@ -200,6 +261,7 @@ __all__ = (
     "finalize_asset_refs",
     "graph_shot",
     "local_asset_refs",
+    "merge_asset_refs",
     "source_text",
     "structured_from_request",
 )

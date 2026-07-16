@@ -9,6 +9,89 @@ CHARACTER_SUBTYPES = {"human", "animal", "robot", "subject"}
 GENERIC_CHARACTER_LABELS = {"人", "人物", "主角", "角色", "主体"}
 GENERIC_SCENE_LABELS = {"场景", "主要场景"}
 PRONOUN_LABELS = {"他", "她", "它", "他们", "她们", "ta", "they", "he", "she"}
+ANIMAL_REFERENCE_TERMS = (
+    "拉布拉多",
+    "金毛",
+    "边牧",
+    "柯基",
+    "哈士奇",
+    "柴犬",
+    "奶狗",
+    "幼犬",
+    "小狗",
+    "狗狗",
+    "橘猫",
+    "狸花猫",
+    "黑猫",
+    "白猫",
+    "小猫",
+    "猫咪",
+    "猫",
+    "狗",
+    "犬",
+    "兔",
+    "鸟",
+    "马",
+    "鹿",
+    "狐",
+    "狼",
+    "熊",
+    "虎",
+    "狮",
+    "蛇",
+    "龙",
+    "鱼",
+    "cat",
+    "dog",
+    "puppy",
+    "kitten",
+    "animal",
+    "pet",
+)
+PROP_REFERENCE_TERMS = (
+    "荧光绿网球",
+    "网球",
+    "红绳",
+    "牵引绳",
+    "狗绳",
+    "毛线团",
+    "手机",
+    "地图",
+    "钥匙",
+    "信件",
+    "信封",
+    "照片",
+    "金箍棒",
+    "钢爪",
+    "刀",
+    "剑",
+    "棍",
+    "棒",
+    "武器",
+    "道具",
+)
+HUMAN_REFERENCE_TERMS = (
+    "高中生",
+    "学生",
+    "女孩",
+    "女生",
+    "少女",
+    "男孩",
+    "少年",
+    "女人",
+    "男人",
+    "阿姨",
+    "老师",
+    "人物",
+    "人类",
+    "person",
+    "human",
+    "girl",
+    "boy",
+    "woman",
+    "man",
+)
+ROBOT_REFERENCE_TERMS = ("机器人", "机械人", "仿生人", "机甲", "robot", "android", "mecha")
 
 AUDIO_ONLY_TERMS = (
     "城市噪音",
@@ -163,6 +246,9 @@ def normalize_asset_ref_for_contract(
     provisional_name = bool(asset.get("provisional_name"))
     name_source = str(asset.get("name_source") or asset.get("source") or "candidate")
 
+    if asset_type == "character" and _looks_like_prop_reference(raw_label, evidence, context_text):
+        asset_type = "prop"
+
     if asset_type == "scene" and _is_audio_only_city_reference(raw_label, evidence, context_text):
         return None, _diagnostic(raw_label, asset_type, "audio_only_non_visual_city_reference", evidence or context_text)
 
@@ -211,6 +297,8 @@ def normalize_asset_ref_for_contract(
         "provisional_name": provisional_name,
     }
     character_subtype = _character_subtype(asset.get("character_subtype"))
+    if asset_type == "character" and not character_subtype:
+        character_subtype = _inferred_character_subtype(display_name, evidence or context_text)
     if asset_type == "character" and character_subtype:
         normalized["character_subtype"] = character_subtype
     return normalized, None
@@ -376,6 +464,48 @@ def _has_negated_visual_context(text: str) -> bool:
     )
 
 
+def _looks_like_prop_reference(label: str, evidence: str, context: str) -> bool:
+    text = f"{label} {evidence} {context}".casefold()
+    label_text = str(label or "").casefold()
+    if _contains_any(label_text, PROP_REFERENCE_TERMS):
+        return True
+    if label_text in {"球", "ball"} and re.search(r"网球|球面|球体|吐在|叼着|tennis\s+ball", text, flags=re.I):
+        return True
+    return False
+
+
+def _inferred_character_subtype(label: str, evidence: str) -> str:
+    text = f"{label} {evidence}"
+    lowered = text.casefold()
+    if _contains_any(lowered, ROBOT_REFERENCE_TERMS):
+        return "robot"
+    if _looks_like_animal_label(label) or _animal_alias_bound_to_label(label, evidence):
+        return "animal"
+    if _contains_any(f"{label} {evidence}", HUMAN_REFERENCE_TERMS):
+        return "human"
+    return ""
+
+
+def _looks_like_animal_label(label: str) -> bool:
+    return _contains_any(str(label or ""), ANIMAL_REFERENCE_TERMS)
+
+
+def _animal_alias_bound_to_label(label: str, evidence: str) -> bool:
+    clean = re.escape(str(label or "").strip())
+    if not clean:
+        return False
+    animal_pattern = "|".join(re.escape(term) for term in sorted(ANIMAL_REFERENCE_TERMS, key=len, reverse=True))
+    return bool(
+        re.search(rf"(?:{animal_pattern})[“\"']{clean}[”\"']", evidence, flags=re.I)
+        or re.search(rf"{clean}[^，。；,;\n]{{0,12}}(?:是一只|这只|那只)(?:{animal_pattern})", evidence, flags=re.I)
+    )
+
+
+def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
+    lowered = str(text or "").casefold()
+    return any(term.casefold() in lowered for term in terms)
+
+
 def _diagnostic(label: str, asset_type: str, reason: str, evidence: str) -> dict[str, Any]:
     return {
         "label": label,
@@ -426,6 +556,22 @@ def _descriptive_signature(asset: dict[str, Any], fallback: str) -> str:
 
 def _asset_type(value: Any) -> str:
     asset_type = str(value or "").strip()
+    aliases = {
+        "角色": "character",
+        "人物": "character",
+        "动物角色": "character",
+        "animal_character": "character",
+        "scene": "scene",
+        "场景": "scene",
+        "location": "scene",
+        "prop": "prop",
+        "道具": "prop",
+        "object": "prop",
+        "item": "prop",
+    }
+    normalized = aliases.get(asset_type) or aliases.get(asset_type.lower())
+    if normalized:
+        return normalized
     return asset_type if asset_type in ASSET_TYPES else "character"
 
 

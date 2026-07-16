@@ -993,6 +993,81 @@ def test_shot_asset_plan_uses_llm_asset_contract_for_animal_subtype(tmp_path, mo
     assert response_contains_unsafe_marker(payload) is False
 
 
+def test_shot_asset_plan_merges_storyboard_animal_coreference_when_provider_omits_it(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AFS_ALLOW_REMOTE_LLM", "true")
+
+    class Descriptor:
+        modality = "llm"
+
+    class FakeRegistry:
+        _descriptors = {"prompt_optimizer": Descriptor()}
+
+        def dispatch(self, capability, service_id, request):
+            assert capability == "llm"
+            assert service_id == "prompt_optimizer"
+            evidence = "狗直奔小华，在距她拖鞋鞋尖三十厘米处骤然刹住，球被轻轻吐在拖鞋边。"
+            return {
+                "text": json.dumps(
+                    {
+                        "assets": [
+                            {
+                                "label": "小华",
+                                "asset_type": "character",
+                                "character_subtype": "human",
+                                "evidence_text": evidence,
+                                "facts": {"identity": "小华"},
+                                "continuity_locks": ["保持小华人物身份"],
+                                "negative_locks": ["不要把小华改成动物"],
+                                "role_in_shot": "狗奔向的对象",
+                                "confidence": 0.91,
+                            }
+                        ],
+                        "dropped_candidates": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                "provider_calls_started": True,
+            }
+
+    monkeypatch.setattr("apps.api.runtime_shot_asset_plan.load_provider_registry", lambda: FakeRegistry())
+    client = TestClient(create_runtime_app(runtime_root=tmp_path))
+    project_id = "proj_llm_asset_plan_coref_dog"
+    client.post("/projects", json={"project_id": project_id, "goal": "Asset profile plan"})
+
+    script_text = (
+        "小华蹲在公园长椅旁。"
+        "一只黑色拉布拉多突然从斜坡草甸冲下，嘴里叼着一只磨损严重的荧光绿网球。"
+        "狗直奔小华，在距她拖鞋鞋尖三十厘米处骤然刹住，球被轻轻吐在拖鞋边。"
+    )
+    response = client.post(
+        f"/projects/{project_id}/shot-asset-plans",
+        json={
+            "node_id": "shot_dog_coreference",
+            "shot": {
+                "shot_id": "S03",
+                "index": 3,
+                "description": "@小华。狗直奔小华，在距她拖鞋鞋尖三十厘米处骤然刹住，球被轻轻吐在拖鞋边。",
+                "asset_refs": [
+                    {"label": "小华", "asset_type": "character", "status": "mentioned", "source": "explicit"},
+                ],
+            },
+            "script_text": script_text,
+            "generated_at": "2026-07-16T14:20:00+08:00",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    refs = {item["label"]: item for item in payload["asset_refs"]}
+
+    assert payload["safe_manifest"]["status"] == "provider_structured_asset_plan"
+    assert "小华" in refs
+    assert "黑色拉布拉多" in refs
+    assert refs["小华"]["profile_plan"]["character_subtype"] == "human"
+    assert refs["黑色拉布拉多"]["profile_plan"]["character_subtype"] == "animal"
+    assert refs["黑色拉布拉多"]["profile_plan"]["facts"]["species"] == "狗"
+
+
 def test_shot_asset_plan_rejects_ungrounded_provider_assets(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("AFS_ALLOW_REMOTE_LLM", "true")
 

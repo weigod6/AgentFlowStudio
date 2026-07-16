@@ -23,6 +23,7 @@ from apps.api.runtime_shot_asset_plan_refs import (
     finalize_asset_refs,
     graph_shot,
     local_asset_refs,
+    merge_asset_refs,
     source_text,
     structured_from_request,
 )
@@ -99,6 +100,7 @@ def build_shot_asset_plan(
         refs = local_asset_refs(request, shot, inferred_shot, text)
         refs, dropped_refs = principal_asset_refs_with_diagnostics(refs)
     else:
+        refs = merge_asset_refs(refs, local_asset_refs(request, shot, inferred_shot, text))
         refs = finalize_asset_refs(refs, text)
         refs, dropped_refs = principal_asset_refs_with_diagnostics(refs, dropped_refs)
 

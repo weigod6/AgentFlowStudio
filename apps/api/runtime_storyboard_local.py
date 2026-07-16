@@ -21,6 +21,13 @@ SCENE_HINTS = ("主要场景", "场景", "办公室", "房间", "街道", "巷�
 KNOWN_CHARACTER_NAMES = ("唐僧", "白骨精", "孙悟空", "猪八戒", "沙僧", "金刚狼", "林晚")
 CHARACTER_HINTS = ("主角", "角色", "人物", "女孩", "女生", "男孩", "女人", "男人", "老人", "孩子", "机器人", "队长", "老师", "学生", "皇帝", "侦探", *KNOWN_CHARACTER_NAMES)
 ANIMAL_CHARACTER_HINTS = (
+    "拉布拉多",
+    "金毛",
+    "边牧",
+    "柯基",
+    "哈士奇",
+    "贵宾犬",
+    "萨摩耶",
     "橘猫",
     "流浪猫",
     "狸花猫",
@@ -41,7 +48,7 @@ ANIMAL_CHARACTER_HINTS = (
 ANIMAL_ENTITY_LABELS = tuple(sorted(ANIMAL_CHARACTER_HINTS, key=len, reverse=True))
 HUMAN_ROLE_LABELS = ("邻居阿姨", "阿姨", "女人", "男人", "男孩", "女孩", "高中生", "学生", "老师", "老人", "孩子")
 SPEECH_VERBS_RE = re.compile(r"(?:说|说道|喊|叫|问|答|低声|大喊|呼喊|喃喃|嘀咕|台词|对白|旁白)")
-PROP_HINTS = ("金箍棒", "手机", "电脑", "键盘", "刀", "剑", "棍", "棒", "车辆", "汽车", "信件", "信封", "信纸", "照片", "路灯", "台灯", "灯具", "灯柱", "书", "门", "地图")
+PROP_HINTS = ("荧光绿网球", "网球", "毛线团", "红绳", "牵引绳", "狗绳", "金箍棒", "手机", "电脑", "键盘", "刀", "剑", "棍", "棒", "车辆", "汽车", "信件", "信封", "信纸", "照片", "路灯", "台灯", "灯具", "灯柱", "书", "门", "地图")
 GENERIC_CHARACTER_LABELS = {"主角", "角色", "人物"}
 GENERIC_SCENE_LABELS = {"主要场景", "场景"}
 
@@ -347,6 +354,11 @@ def _positioned_visible_character_labels(source: str) -> list[tuple[int, str]]:
         index = source.find(role)
         if index >= 0:
             labels.append((index, role))
+    for match in re.finditer(
+        r"((?:黑色|白色|灰色|棕色|黄色|金色|灰白相间|黑白相间)?(?:拉布拉多|金毛|边牧|柯基|哈士奇|贵宾犬|萨摩耶|柴犬)(?:幼崽|幼犬)?)",
+        source,
+    ):
+        labels.append((match.start(1), match.group(1)))
     for label in ANIMAL_ENTITY_LABELS:
         if len(label) <= 1:
             continue

@@ -305,3 +305,80 @@ def test_storyboard_provider_parser_preserves_source_script_english() -> None:
     serialized = json.dumps(shots[0], ensure_ascii=False)
     assert "Bob" in serialized
     assert "AI camera" in serialized
+
+
+def test_storyboard_provider_parser_types_animals_props_and_resolves_dog_coreference() -> None:
+    source_script = (
+        "小华蹲在公园长椅旁。"
+        "一只黑色拉布拉多突然从斜坡草甸冲下，嘴里叼着一只磨损严重的荧光绿网球。"
+        "狗直奔小华，在距她拖鞋鞋尖三十厘米处骤然刹住，球被轻轻吐在拖鞋边。"
+    )
+    payload = {
+        "shots": [
+            {
+                "shot_id": "shot_01",
+                "index": 1,
+                "duration": "2.2",
+                "description": "@小华。小华蹲在公园长椅旁，眼神空落。",
+                "shot_size": "中景",
+                "light_atmosphere": "自然光影",
+                "camera_motion": "固定机位",
+                "dialogue": "无明确对白",
+                "sound": "环境底噪",
+                "source_span": {"text": "小华蹲在公园长椅旁。"},
+                "asset_refs": [
+                    {"label": "小华", "asset_type": "character", "status": "mentioned", "source": "explicit"},
+                ],
+            },
+            {
+                "shot_id": "shot_02",
+                "index": 2,
+                "duration": "2.8",
+                "description": "@黑色拉布拉多 @荧光绿网球 @斜坡草甸。一只黑色拉布拉多突然从斜坡草甸冲下，嘴里叼着一只磨损严重的荧光绿网球。",
+                "shot_size": "中景",
+                "light_atmosphere": "正午强光",
+                "camera_motion": "跟拍移动",
+                "dialogue": "无明确对白",
+                "sound": "奔跑踏草声",
+                "source_span": {"text": "一只黑色拉布拉多突然从斜坡草甸冲下，嘴里叼着一只磨损严重的荧光绿网球。"},
+                "asset_refs": [
+                    {"label": "黑色拉布拉多", "asset_type": "character", "status": "mentioned", "source": "explicit"},
+                    {"label": "荧光绿网球", "asset_type": "character", "status": "prop_relevant", "source": "explicit"},
+                    {"label": "斜坡草甸", "asset_type": "scene", "status": "mentioned", "source": "explicit"},
+                ],
+            },
+            {
+                "shot_id": "shot_03",
+                "index": 3,
+                "duration": "2.1",
+                "description": "@小华。狗直奔小华，在距她拖鞋鞋尖三十厘米处骤然刹住，球被轻轻吐在拖鞋边。",
+                "shot_size": "特写",
+                "light_atmosphere": "正午高光",
+                "camera_motion": "固定机位",
+                "dialogue": "无明确对白",
+                "sound": "急停爪地声",
+                "source_span": {"text": "狗直奔小华，在距她拖鞋鞋尖三十厘米处骤然刹住，球被轻轻吐在拖鞋边。"},
+                "asset_refs": [
+                    {"label": "小华", "asset_type": "character", "status": "mentioned", "source": "explicit"},
+                ],
+            },
+        ]
+    }
+
+    shots = shots_from_provider_text(json.dumps(payload, ensure_ascii=False), source_script_text=source_script)
+
+    shot2_refs = {item["label"]: item for item in shots[1]["asset_refs"]}
+    shot3_refs = {item["label"]: item for item in shots[2]["asset_refs"]}
+    shot2_dropped = shots[1]["dropped_asset_ref_diagnostics"]
+
+    assert shot2_refs["黑色拉布拉多"]["character_subtype"] == "animal"
+    assert "荧光绿网球" not in shot2_refs
+    assert any(
+        item["display_name"] == "荧光绿网球"
+        and item["asset_type"] == "prop"
+        and item["reason"] == "prop_requires_manual_asset_entry"
+        for item in shot2_dropped
+    )
+    assert "小华" in shot3_refs
+    assert shot3_refs["黑色拉布拉多"]["character_subtype"] == "animal"
+    assert shot3_refs["黑色拉布拉多"]["source"] == "cross_shot_coreference"

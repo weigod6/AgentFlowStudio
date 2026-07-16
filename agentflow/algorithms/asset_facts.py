@@ -8,7 +8,7 @@ FACT_PROFILE_SCHEMA_VERSION = "0.1.0"
 
 ANIMAL_TAXONOMY: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("猫", ("猫", "狸花猫", "橘猫", "黑猫", "白猫", "小猫", "猫咪", "kitten", "cat", "feline")),
-    ("狗", ("狗", "犬", "小狗", "幼犬", "puppy", "dog", "canine")),
+    ("狗", ("狗", "犬", "小狗", "幼犬", "奶狗", "拉布拉多", "金毛", "边牧", "柯基", "哈士奇", "柴犬", "puppy", "dog", "canine")),
     ("兔", ("兔", "兔子", "rabbit", "bunny")),
     ("鸟", ("鸟", "雀", "鹰", "鸦", "鹤", "bird", "eagle", "crow")),
     ("马", ("马", "horse")),
