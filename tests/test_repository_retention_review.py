@@ -27,6 +27,8 @@ def test_repository_retention_review_classifies_delete_candidate_and_known_paths
     (tmp_path / "package.json").write_text('{"type":"module"}\n', encoding="utf-8")
     (tmp_path / "agentflow_studio").mkdir()
     (tmp_path / "agentflow_studio" / "memory_advantage_demo_012.py").write_text("", encoding="utf-8")
+    (tmp_path / "experiments" / "episode-loop").mkdir(parents=True)
+    (tmp_path / "experiments" / "episode-loop" / "fixture.json").write_text("{}\n", encoding="utf-8")
 
     report = build_repository_retention_review(tmp_path)
     files = {item["path"]: item for item in report["files"]}
@@ -53,6 +55,8 @@ def test_repository_retention_review_classifies_delete_candidate_and_known_paths
     assert files["package.json"]["status"] == "current"
     assert files["agentflow_studio/memory_advantage_demo_012.py"]["product_surface"] == "delete_candidate"
     assert files["agentflow_studio/memory_advantage_demo_012.py"]["status"] == "legacy_demo_runtime"
+    assert files["experiments/episode-loop/fixture.json"]["product_surface"] == "verification_surface"
+    assert files["experiments/episode-loop/fixture.json"]["status"] == "current"
     assert report["summary"]["delete_candidate_count"] == 4
 
 

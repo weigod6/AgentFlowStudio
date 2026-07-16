@@ -195,5 +195,5 @@ function withExpected(payload, expectedStateVersion) {
 }
 
 function safeError(error) {
-  return String(error?.message || error || "数字剧组请求失败").slice(0, 240);
+  return String(error?.message || error || "制作团队请求失败").slice(0, 240);
 }

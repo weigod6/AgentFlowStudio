@@ -86,6 +86,8 @@ def review_directory(path: str) -> ReviewedPath:
         return _dir(path, "mixed_docs_surface", "review_for_currentness", "架构、contract、runbook 或产品当前参考文档；旧长文需要继续归档。")
     if path.startswith("examples"):
         return _dir(path, "supporting_contract", "current", "示例输入和 contract fixture 被测试、CLI smoke 或文档引用。")
+    if path.startswith("experiments"):
+        return _dir(path, "verification_surface", "current", "实验夹具用于可复现实验与回归验证，不构成当前产品方向或入口。")
     if path.startswith("tests"):
         return _dir(path, "verification_surface", "current", "自动化验证面，支撑重构和前端对接边界。")
     if path.startswith("tools"):
@@ -191,6 +193,15 @@ def review_file(path: str, git_state: str) -> ReviewedPath:
         return _file(path, git_state, "mixed_docs_surface", "review_for_currentness", "架构、contract、runbook、产品或测试参考文档。")
     if path.startswith("examples/"):
         return _file(path, git_state, "supporting_contract", "current", "示例输入、contract registry 或前端 request fixture。")
+    if path.startswith("experiments/"):
+        return _file(
+            path,
+            git_state,
+            "verification_surface",
+            "current",
+            "实验夹具用于可复现实验与回归验证，不构成当前产品方向或入口。",
+            "对应验证协议和自动化引用解除、Git 历史足以复现后再删除。",
+        )
     if path in {"tests/test_memory_advantage_demo_012.py", "tests/test_memory_advantage_demo_015.py"} or path.startswith("tests/memory_advantage_demo_"):
         return _file(path, git_state, "delete_candidate", "legacy_demo_verification", "只覆盖编号式历史 demo；旧 demo 已退出当前产品脊柱，应同步删除。", "删除后如需恢复，必须重新证明其服务当前产品主线。")
     if path.startswith("tests/"):

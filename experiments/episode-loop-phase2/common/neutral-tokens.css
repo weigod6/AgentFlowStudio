@@ -1,0 +1,48 @@
+:root {
+  color-scheme: light;
+  --phase2-bg: #f5f3ee;
+  --phase2-surface: #ffffff;
+  --phase2-ink: #1f2523;
+  --phase2-muted: #65706b;
+  --phase2-border: #d8dcd8;
+  --phase2-accent: #236f5b;
+  --phase2-danger: #a43d36;
+  --phase2-focus: #1769aa;
+  --phase2-radius: 10px;
+  --phase2-space-1: 4px;
+  --phase2-space-2: 8px;
+  --phase2-space-3: 12px;
+  --phase2-space-4: 16px;
+  --phase2-space-6: 24px;
+  font-family: Inter, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 0;
+  background: var(--phase2-bg);
+  color: var(--phase2-ink);
+}
+
+button,
+input,
+select,
+textarea {
+  min-height: 44px;
+  font: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid var(--phase2-focus);
+  outline-offset: 2px;
+}
+
+[hidden] {
+  display: none !important;
+}

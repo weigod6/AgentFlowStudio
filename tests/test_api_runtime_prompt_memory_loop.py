@@ -764,6 +764,44 @@ def test_studio_prompt_optimizer_does_not_fallback_when_remote_llm_output_is_rej
     assert "enhancement missing required sections" in _runtime_error_raw_detail(result)
 
 
+def test_studio_prompt_optimizer_can_disable_format_retry_for_stop_loss(tmp_path, monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeRegistry:
+        def dispatch(self, capability, service_id, request):
+            assert capability == "llm"
+            assert service_id == "prompt_optimizer"
+            calls.append(request.task_type)
+            return {"text": "只有一句不合格的返回。"}
+
+    monkeypatch.setenv("AFS_ALLOW_REMOTE_LLM", "true")
+    monkeypatch.setattr("apps.api.runtime_llm_enhancement.load_provider_registry", lambda: FakeRegistry())
+    client = TestClient(create_runtime_app(runtime_root=tmp_path))
+
+    result = client.post(
+        "/projects/proj_studio_remote_optimizer_retry_disabled/prompt-optimizations",
+        json={
+            "node_id": "image-node-studio-retry-disabled",
+            "node_type": "image",
+            "prompt_text": "A desert walking keyframe with a fixed character.",
+            "generation_target": "keyframe",
+            "target_platform": "short_video",
+            "style": "cinematic",
+            "node_parameters": {
+                "model": "image2-keyframe",
+                "llm_provider": "prompt_optimizer",
+                "remote_optimizer_required": True,
+                "disable_provider_retry": True,
+            },
+            "generated_at": "2026-06-13T01:36:00+08:00",
+        },
+    )
+
+    assert result.status_code == 422
+    assert calls == ["prompt_enhancement"]
+    assert "enhancement_missing_required_sections_retry_disabled" in _runtime_error_raw_detail(result)
+
+
 def test_studio_prompt_optimizer_rejects_provider_infrastructure_error_text(tmp_path, monkeypatch) -> None:
     provider_error = (
         "Unable to read `request.json` or `prompt.md`: the local command sandbox fails "

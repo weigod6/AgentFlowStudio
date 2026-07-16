@@ -925,7 +925,7 @@ process.stdout.write(JSON.stringify({
     assert "25/25 已接纳" in payload["text"]
     assert "135 秒技术检查通过" in payload["text"]
     assert "代表性内容质量、人工验收和商业验证尚未开始" in payload["text"]
-    assert "本集数字剧组" in payload["text"]
+    assert "本集制作团队" in payload["text"]
     assert "版本传播已完成" in payload["text"]
     assert "交付组的本集制作责任" in payload["text"]
     assert "已按批准版本重确认" in payload["text"]
@@ -946,7 +946,7 @@ def test_review_delivery_canon_mobile_contract_has_single_column_and_no_raw_diag
     assert "本集制作规范" in source
     assert "15/15 镜已绑定" in source
     assert "镜头顺序、版本、连续性与音频覆盖均来自当前项目的服务器制作记录" in source
-    assert "本集数字剧组" in source
+    assert "本集制作团队" in source
     assert "规范媒体与技术交付" in source
     assert "结构检查不等于内容质量验收" in source
     assert "九个制作岗位的当前责任、批准版本与下游确认均来自项目服务器记录" in source

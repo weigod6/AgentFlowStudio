@@ -117,19 +117,19 @@ function buildEpisodeCrew(state) {
   section.setAttribute("aria-labelledby", "episode-crew-heading");
   const header = el("header", "episode-crew-head");
   const copy = el("div");
-  const title = el("h2", "", "本集数字剧组");
+  const title = el("h2", "", "本集制作团队");
   title.id = "episode-crew-heading";
   copy.append(
     title,
     el("p", "", execution?.role_count === 9
       ? "九个制作岗位的当前责任、批准版本与下游确认均来自项目服务器记录。"
-      : "本集尚未形成完整的数字剧组责任链，不会把缺失岗位显示为已完成。"),
+      : "本集尚未形成完整的制作团队责任链，不会把缺失岗位显示为已完成。"),
   );
   const complete = execution?.propagation_complete === true;
   header.append(copy, el("span", `crew-state ${complete ? "ready" : "pending"}`, complete ? "版本传播已完成" : "等待下游确认"));
   section.appendChild(header);
   if (!execution?.responsibilities?.length) {
-    section.appendChild(el("div", "crew-empty", "数字剧组责任状态暂不可用"));
+    section.appendChild(el("div", "crew-empty", "制作团队责任状态暂不可用"));
     return section;
   }
   const summary = el("div", "crew-summary");
@@ -140,7 +140,7 @@ function buildEpisodeCrew(state) {
   );
   section.appendChild(summary);
   const list = el("ol", "crew-responsibility-list");
-  list.setAttribute("aria-label", "本集九个数字剧组岗位责任");
+  list.setAttribute("aria-label", "本集九个制作团队岗位责任");
   for (const item of execution.responsibilities) {
     const row = el("li", `crew-responsibility ${item.reconfirmed ? "reconfirmed" : item.pending_reconfirmation ? "pending" : "active"}`);
     const head = el("div", "crew-responsibility-head");

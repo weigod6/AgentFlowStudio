@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 
 from agentflow.algorithms.quality_feedback_scoring import sanitize_quality_feedback
-from agentflow.harness.json_io import write_json
+from agentflow.harness.json_io import exclusive_file_lock, write_json
 from apps.api.runtime_cors import configure_runtime_cors
 from apps.api.runtime_errors import safe_error_detail
 from apps.api.runtime_exception_handlers import configure_runtime_exception_handlers
@@ -27,7 +27,17 @@ from apps.api.runtime_models import (
 from apps.api.runtime_prompt_memory_routes import register_runtime_prompt_memory_routes
 from apps.api.runtime_production_runs import register_runtime_production_run_routes
 from apps.api.runtime_product_read_models import register_runtime_product_read_model_routes
+from apps.api.runtime_production_control import register_runtime_production_control_routes
 from apps.api.runtime_domain_crew import register_runtime_domain_crew_routes
+from apps.api.runtime_episode_bootstrap import (
+    ensure_minimal_episode_bootstrap,
+    should_bootstrap_episode_project,
+)
+from apps.api.runtime_episode_domain_routes import register_runtime_episode_domain_routes
+from apps.api.runtime_episode_domain_contract import TenantScope
+from apps.api.runtime_episode_domain_routes import LOCAL_ACTOR_ID, LOCAL_ORG_ID
+from apps.api.runtime_episode_command_routes import register_runtime_episode_command_routes
+from apps.api.runtime_episode_workspace_routes import register_runtime_episode_workspace_routes
 from apps.api.runtime_provider_script_routes import register_runtime_provider_script_routes
 from apps.api.runtime_social_square import register_runtime_social_square_routes
 from apps.api.runtime_shot_asset_plan import register_runtime_shot_asset_plan_routes
@@ -35,6 +45,8 @@ from apps.api.runtime_storyboard_breakdown import register_runtime_storyboard_ro
 from apps.api.runtime_generation_comparisons import register_runtime_generation_comparison_routes
 from apps.api.runtime_accepted_generation_plan import register_runtime_accepted_generation_plan_routes
 from apps.api.runtime_company_os import register_runtime_company_os_routes
+from apps.api.runtime_creator_golden_trial import register_runtime_creator_golden_trial_routes
+from apps.api.runtime_commercial_production import register_runtime_commercial_production_routes
 from apps.api.runtime_feedback_candidate import register_runtime_feedback_candidate_routes
 from apps.api.runtime_human_gate import register_runtime_human_gate_routes
 from apps.api.runtime_keyframe_local_edit import register_runtime_keyframe_local_edit_routes
@@ -157,21 +169,47 @@ def create_runtime_app(
 
     @app.post("/projects")
     def create_project(request: Request, body: ProjectCreateRequest) -> dict[str, Any]:
-        user = auth.require_user(request) if auth.enabled() else None
-        if user:
-            owner = auth.project_owner(body.project_id)
-            if owner and owner != str(user["user_id"]):
-                raise HTTPException(status_code=403, detail="project access denied")
-        manifest = store.create_project_manifest(
-            project_id=body.project_id,
-            project_type=body.project_type,
-            goal=body.goal,
-            status=body.status,
-        )
-        if user:
-            auth.register_project_owner(body.project_id, str(user["user_id"]))
-        ref = store.register_artifact(store.project_manifest_path(body.project_id), role="project_manifest")
-        return {"project_id": body.project_id, "manifest": manifest, "artifact": ref, "flow": build_flow_summary(store, body.project_id)}
+        lock_path = store.projects_dir / safe_id(body.project_id) / "project_create.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with exclusive_file_lock(lock_path):
+            user = auth.require_user(request) if auth.enabled() else None
+            if user:
+                owner = auth.project_owner(body.project_id)
+                if owner and owner != str(user["user_id"]):
+                    raise HTTPException(status_code=403, detail="project access denied")
+            manifest = _create_or_replay_project_manifest(store, body)
+            if user:
+                auth.register_project_owner(body.project_id, str(user["user_id"]))
+            episode_bootstrap = None
+            if should_bootstrap_episode_project(body.project_type):
+                actor_id = str(user["user_id"]) if user else LOCAL_ACTOR_ID
+                scope = TenantScope(
+                    org_id=str(user["user_id"]) if user else LOCAL_ORG_ID,
+                    project_id=body.project_id,
+                    actor_id=actor_id,
+                )
+                bootstrap = ensure_minimal_episode_bootstrap(
+                    store,
+                    scope=scope,
+                    title=body.goal,
+                    idempotency_key="project-create-episode-bootstrap-v1",
+                )
+                episode_bootstrap = {
+                    "created": bootstrap.created,
+                    "replayed": bootstrap.replayed,
+                    "aggregate_version": bootstrap.aggregate.aggregate_version,
+                    "workspace_entry": bootstrap.workspace_entry,
+                }
+            ref = store.register_artifact(store.project_manifest_path(body.project_id), role="project_manifest")
+            response = {
+                "project_id": body.project_id,
+                "manifest": manifest,
+                "artifact": ref,
+                "flow": build_flow_summary(store, body.project_id),
+            }
+            if episode_bootstrap is not None:
+                response["episode_bootstrap"] = episode_bootstrap
+            return response
 
     @app.delete("/projects/{project_id}")
     def delete_project(project_id: str, request: Request) -> dict[str, Any]:
@@ -321,7 +359,13 @@ def create_runtime_app(
     register_runtime_social_square_routes(app, store, auth)
     register_runtime_prompt_memory_routes(app, store)
     register_runtime_production_run_routes(app, store, auth)
+    register_runtime_production_control_routes(app, store, auth)
+    register_runtime_creator_golden_trial_routes(app, store, auth)
+    register_runtime_commercial_production_routes(app, store, auth)
     register_runtime_domain_crew_routes(app, store, auth)
+    register_runtime_episode_domain_routes(app, store, auth)
+    register_runtime_episode_command_routes(app, store, auth)
+    register_runtime_episode_workspace_routes(app, store, auth)
     register_runtime_product_read_model_routes(app, store, auth)
     register_runtime_provider_script_routes(app, store)
     register_runtime_storyboard_routes(app, store)
@@ -351,6 +395,41 @@ def legacy_runtime_v02_enabled() -> bool:
 
 def sanitize_runtime_feedback(feedback: dict[str, Any]) -> dict[str, Any]:
     return sanitize_quality_feedback(feedback)
+
+
+def _create_or_replay_project_manifest(
+    store: RuntimeStore,
+    body: ProjectCreateRequest,
+) -> dict[str, Any]:
+    path = store.project_manifest_path(body.project_id)
+    active_manifest_exists = path.is_file() and not store.is_project_deleted(body.project_id)
+    if not active_manifest_exists:
+        return store.create_project_manifest(
+            project_id=body.project_id,
+            project_type=body.project_type,
+            goal=body.goal,
+            status=body.status,
+        )
+
+    manifest = store.ensure_project_manifest(body.project_id)
+    expected = {
+        "project_id": body.project_id,
+        "project_type": body.project_type,
+        "goal": body.goal,
+        "status": body.status,
+    }
+    actual = {key: manifest.get(key) for key in expected}
+    if actual != expected:
+        detail = safe_error_detail(
+            "project_create_replay_conflict",
+            message="项目已存在，创建参数和原记录不一致。",
+            user_action="请打开已有项目，或使用新的项目名称重新创建。",
+            project_id=body.project_id,
+            action="create_project",
+            stage="idempotency",
+        )
+        raise HTTPException(status_code=409, detail=detail)
+    return manifest
 
 
 def _enforce_project_access(auth: RuntimeAuthStore, request: Request, project_id: str) -> None:

@@ -17,6 +17,9 @@ claims need explicit gates and matching evidence.
 
 - [Contributor onboarding](CONTRIBUTOR_ONBOARDING.md)
 - [AOS current state](AOS_CURRENT_STATE.md)
+- [Single-episode loop Program](AFS_EPISODE_LOOP_PROGRAM.md)
+- [Phase 1 evidence matrix](research/AFS_PHASE1_EVIDENCE_MATRIX.md)
+- [Phase 2 same-task evaluation protocol](AFS_EPISODE_LOOP_PHASE2_EVALUATION_PROTOCOL.md)
 - [Company operating projection](company_operating_model.md)
 - [GFR execution projection](GFR_EXECUTION_PROJECTION.md)
 - [Current architecture](current_architecture.md)
@@ -34,6 +37,8 @@ static memory-workbench paths are not task entrypoints.
 ## Architecture And Contracts
 
 - [Current architecture](current_architecture.md)
+- [Episode production fact contract](architecture/AFS_EPISODE_PRODUCTION_FACT_CONTRACT.md)
+- [Production Control Contract v0.1](architecture/AFS_PRODUCTION_CONTROL_CONTRACT_V0.1.md)
 - [Studio entity/status vocabulary contract](architecture/AFS_STUDIO_ENTITY_STATUS_VOCABULARY_CONTRACT.md)
 - [Node prompt optimizer contract](architecture/AFS_NODE_PROMPT_OPTIMIZER_CONTRACT.zh-CN.md)
 - [Creative intent control agent engineering summary](architecture/AFS_CREATIVE_INTENT_CONTROL_AGENT_ENGINEERING_SUMMARY.zh-CN.md)

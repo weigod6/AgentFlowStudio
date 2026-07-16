@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from apps.api.runtime_episode_domain_store import EpisodeDomainAggregateStore
 from apps.api.runtime_errors import response_contains_unsafe_marker
 from apps.api.runtime_info import runtime_root_is_persisted
 from apps.api.runtime_service import create_runtime_app
@@ -261,7 +262,7 @@ def test_runtime_service_serves_site_homepage_as_root_entry(tmp_path) -> None:
     assert 'href="/studio/"' in home.text
     assert "数字内容制作工作空间" in home.text
     assert "进入制作工作空间" in home.text
-    assert "让数字剧组完成一集内容" in home.text
+    assert "让智能制片中枢推进一集内容" in home.text
     assert "studio-wall" in home.text
     assert 'href="/site/social-square.html"' not in home.text
     assert "社交广场" not in home.text
@@ -312,6 +313,221 @@ def test_runtime_service_creates_project_manifest_and_reads_safe_artifact(tmp_pa
     assert artifact["artifact_type"] == "agentflow_project_manifest"
     assert artifact["payload"]["does_not_store_secrets"] is True
     assert "path" not in json.dumps(artifact, ensure_ascii=False).lower()
+
+
+def test_studio_project_create_bootstraps_episode_facts_without_raw_aggregate_put(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("AFS_AUTH_ENABLED", "true")
+    monkeypatch.setenv("AFS_AUTH_ALLOW_OPEN_SIGNUP", "true")
+    client = TestClient(create_runtime_app(runtime_root=tmp_path))
+
+    owner = client.post(
+        "/auth/register",
+        json={
+            "email": "owner@example.com",
+            "password": "strong-password-123",
+            "display_name": "Owner",
+            "invite_code": "",
+        },
+    )
+    other = client.post(
+        "/auth/register",
+        json={
+            "email": "other@example.com",
+            "password": "strong-password-123",
+            "display_name": "Other",
+            "invite_code": "",
+        },
+    )
+    assert owner.status_code == 200, owner.text
+    assert other.status_code == 200, other.text
+    owner_headers = {"Authorization": f"Bearer {owner.json()['session_token']}"}
+    other_headers = {"Authorization": f"Bearer {other.json()['session_token']}"}
+
+    created = client.post(
+        "/projects",
+        headers=owner_headers,
+        json={
+            "project_id": "creator-ui-project",
+            "project_type": "studio_episode_production",
+            "goal": "创作者主导的一集制作",
+        },
+    )
+    replay = client.post(
+        "/projects",
+        headers=owner_headers,
+        json={
+            "project_id": "creator-ui-project",
+            "project_type": "studio_episode_production",
+            "goal": "创作者主导的一集制作",
+        },
+    )
+
+    assert created.status_code == 200, created.text
+    assert replay.status_code == 200, replay.text
+    assert created.json()["episode_bootstrap"]["created"] is True
+    assert replay.json()["episode_bootstrap"]["replayed"] is True
+    assert created.json()["episode_bootstrap"]["workspace_entry"] == {
+        "episode_id": "episode-001",
+        "episode_version_id": "episode-001-v1",
+        "href": "/studio/episode-workspace/?project=creator-ui-project&episode=episode-001&version=episode-001-v1",
+    }
+
+    aggregate = client.get(
+        "/projects/creator-ui-project/episode-production-aggregate",
+        headers=owner_headers,
+    )
+    assert aggregate.status_code == 200, aggregate.text
+    payload = aggregate.json()["aggregate"]
+    assert payload["scope"]["org_id"] == owner.json()["user"]["user_id"]
+    assert payload["scope"]["actor_id"] == owner.json()["user"]["user_id"]
+    assert payload["projects"][0]["data_policy"]["visibility"] == "private"
+    assert payload["projects"][0]["data_policy"]["training_use"] == "denied_by_default"
+    assert [item["entity_id"] for item in payload["shots"]] == [
+        "shot-001",
+        "shot-002",
+        "shot-003",
+    ]
+
+    workspace = client.get(
+        "/projects/creator-ui-project/episodes/episode-001/versions/episode-001-v1/workspace",
+        headers=owner_headers,
+    )
+    assert workspace.status_code == 200, workspace.text
+    assert workspace.json()["workspace"]["truth"] == {
+        "scene_count": 1,
+        "shot_count": 3,
+        "duration_seconds": 9.0,
+        "missing_asset_count": 0,
+        "generation_dispatch_count": 0,
+        "playable_preview_available": False,
+    }
+
+    assert client.get(
+        "/projects/creator-ui-project/episode-production-aggregate",
+        headers=other_headers,
+    ).status_code == 403
+
+    restarted = TestClient(create_runtime_app(runtime_root=tmp_path))
+    recovered = restarted.get(
+        "/projects/creator-ui-project/episodes/episode-001/versions/episode-001-v1/workspace",
+        headers=owner_headers,
+    )
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()["workspace"]["shots"][0]["ref"] == {
+        "entity_type": "shot",
+        "entity_id": "shot-001",
+        "version_id": "shot-001-v1",
+    }
+
+
+def test_studio_project_create_replay_repairs_manifest_success_aggregate_failure(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("AFS_AUTH_ENABLED", "true")
+    monkeypatch.setenv("AFS_AUTH_ALLOW_OPEN_SIGNUP", "true")
+    failures = {"remaining": 1}
+
+    import apps.api.runtime_service as runtime_service
+
+    original = runtime_service.ensure_minimal_episode_bootstrap
+
+    def fail_once(*args, **kwargs):
+        if failures["remaining"]:
+            failures["remaining"] -= 1
+            raise RuntimeError("injected aggregate bootstrap failure")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(runtime_service, "ensure_minimal_episode_bootstrap", fail_once)
+    client = TestClient(create_runtime_app(runtime_root=tmp_path), raise_server_exceptions=False)
+    owner = client.post(
+        "/auth/register",
+        json={
+            "email": "owner@example.com",
+            "password": "strong-password-123",
+            "display_name": "Owner",
+            "invite_code": "",
+        },
+    )
+    assert owner.status_code == 200, owner.text
+    headers = {"Authorization": f"Bearer {owner.json()['session_token']}"}
+    body = {
+        "project_id": "bootstrap-replay",
+        "project_type": "studio_episode_production",
+        "goal": "可恢复创建",
+    }
+
+    failed = client.post("/projects", headers=headers, json=body)
+    assert failed.status_code == 500
+    assert (tmp_path / "projects" / "bootstrap-replay" / "project_manifest.json").is_file()
+    snapshot = EpisodeDomainAggregateStore(tmp_path).snapshot_path(
+        org_id=owner.json()["user"]["user_id"],
+        project_id="bootstrap-replay",
+    )
+    assert not snapshot.exists()
+
+    replay = client.post("/projects", headers=headers, json=body)
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["episode_bootstrap"]["created"] is True
+    assert snapshot.is_file()
+    workspace = client.get(
+        "/projects/bootstrap-replay/episodes/episode-001/versions/episode-001-v1/workspace",
+        headers=headers,
+    )
+    assert workspace.status_code == 200, workspace.text
+    assert workspace.json()["workspace"]["truth"]["shot_count"] == 3
+
+
+def test_studio_project_create_rejects_divergent_replay_without_manifest_or_aggregate_drift(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("AFS_AUTH_ENABLED", "true")
+    monkeypatch.setenv("AFS_AUTH_ALLOW_OPEN_SIGNUP", "true")
+    client = TestClient(create_runtime_app(runtime_root=tmp_path))
+    owner = client.post(
+        "/auth/register",
+        json={
+            "email": "owner@example.com",
+            "password": "strong-password-123",
+            "display_name": "Owner",
+            "invite_code": "",
+        },
+    )
+    assert owner.status_code == 200, owner.text
+    headers = {"Authorization": f"Bearer {owner.json()['session_token']}"}
+    first_body = {
+        "project_id": "create-replay-guard",
+        "project_type": "studio_episode_production",
+        "goal": "第一版制作目标",
+        "status": "in_progress",
+    }
+    divergent_body = {
+        **first_body,
+        "goal": "第二版不应覆盖",
+        "status": "blocked",
+    }
+
+    created = client.post("/projects", headers=headers, json=first_body)
+    assert created.status_code == 200, created.text
+    rejected = client.post("/projects", headers=headers, json=divergent_body)
+    assert rejected.status_code == 409
+    assert rejected.json()["detail"]["error"] == "project_create_replay_conflict"
+
+    manifest = client.get("/projects/create-replay-guard/manifest", headers=headers)
+    assert manifest.status_code == 200, manifest.text
+    assert manifest.json()["manifest"]["goal"] == "第一版制作目标"
+    assert manifest.json()["manifest"]["status"] == "in_progress"
+
+    aggregate = client.get(
+        "/projects/create-replay-guard/episode-production-aggregate",
+        headers=headers,
+    )
+    assert aggregate.status_code == 200, aggregate.text
+    assert aggregate.json()["aggregate"]["projects"][0]["title"] == "第一版制作目标"
 
 
 def test_runtime_service_removed_production_memory_http_routes_return_404(tmp_path) -> None:

@@ -27,6 +27,16 @@
 http://127.0.0.1:8790/studio/
 ```
 
+单集生产工作区是同一静态树下的 review/recovery candidate 子路径，不替换现有画布入口，也不代表完整 AI 原生生产控制面：
+
+```text
+http://127.0.0.1:8790/studio/episode-workspace/?project=<project_id>&episode=<episode_id>&version=<episode_version_id>
+```
+
+该子路径只读取 authenticated creator-safe workspace projection，事实写入只走
+typed episode commands；UI 恢复状态以 `episode_workspace` namespace 合并进现有
+Studio state，不作为制作事实或完成度来源。
+
 ## 边界
 
 - 不重新引入旧 Workbench 或 memory-workbench 页面。

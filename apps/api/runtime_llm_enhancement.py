@@ -239,6 +239,17 @@ def maybe_enhance_prompt_with_llm(
                 provider_output_length=base.get("provider_output_length"),
                 missing_sections=base.get("missing_sections"),
             )
+            if bool((request.node_parameters or {}).get("disable_provider_retry")):
+                return _with_total_elapsed(
+                    {
+                        **base,
+                        "status": "discarded",
+                        "provider_calls_started": True,
+                        "discard_reason": "enhancement_missing_required_sections_retry_disabled",
+                        "format_retry_count": 0,
+                    },
+                    started,
+                )
             retry_started = time.perf_counter()
             _log_prompt_llm_step(
                 "retry_or_salvage_start",

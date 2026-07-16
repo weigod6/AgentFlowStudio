@@ -1,0 +1,50 @@
+{
+  "schema_version": "afs_episode_loop_phase2_fixture_manifest.v0.2",
+  "base_commit": "7f74f2280dca8d4a8d86b9aefda017e5b2e5f62a",
+  "base_commit_role": "phase1_research_evidence_commit",
+  "common_harness_commit": "9bda0a284bdee18866cf4b3c99764065af10fa61",
+  "domain_contract_commit": "bf44e54edaf53a32917522ae7cfbf43563277ded",
+  "domain_contract_revision": "v0.1.1",
+  "domain_contract_wire_schema_literal": "afs_episode_production_aggregate.v0.1",
+  "domain_contract_artifact": {
+    "path": "docs/architecture/AFS_EPISODE_PRODUCTION_FACT_CONTRACT.md",
+    "sha256": "fa489a46fa0c11aa99ad6ef2fb9df3fbb190b4609cd7dc6764792f76222b5588"
+  },
+  "evidence_matrix": {
+    "path": "docs/research/AFS_PHASE1_EVIDENCE_MATRIX.md",
+    "sha256": "290c73640ba6592f692a791f02aef847f2f986e3f1dac0e95c0397ec25918995"
+  },
+  "evaluation_protocol": {
+    "path": "docs/AFS_EPISODE_LOOP_PHASE2_EVALUATION_PROTOCOL.md",
+    "sha256": "c76d6d7e2fefd7169c83472f897efa9ac0108f14dfc7d4345a5b157e7b0112f3"
+  },
+  "evaluation_result": {
+    "path": "docs/AFS_EPISODE_LOOP_PHASE2_EVALUATION_RESULT.md",
+    "sha256": "5a216402f0b59b57370f39b2826b54cfdc389b0a5c759de096e3f524ee1c6d6d"
+  },
+  "fixtures": [
+    {
+      "path": "examples/representative_episode/episode_package.json",
+      "sha256": "0af7d008c39074765e60057f5d80f92f59ce45999ef3e216fd8562a963b9a2a2"
+    },
+    {
+      "path": "examples/representative_episode/episode_revision_v2.json",
+      "sha256": "0796d47c465c0467201d41863ce5abf9a01703e9b7ddb22de0f47be350aea45b"
+    }
+  ],
+  "variants": {
+    "guided": "experiments/episode-loop-phase2/prototypes/guided",
+    "storyboard": "experiments/episode-loop-phase2/prototypes/storyboard",
+    "hybrid": "experiments/episode-loop-phase2/prototypes/hybrid"
+  },
+  "variant_commits": {
+    "guided": "a704a1cc1ba69e745d185ea3098209eaa419bee5",
+    "storyboard": "9edd03f68e9e5c77819985e2ffc4605fc75d4332",
+    "hybrid": "3346f5d4813d2e87a0abf113e73f9757a9eb5531"
+  },
+  "frontend_direction": "hybrid_shell_storyboard_workspace_contextual_decision_inspector",
+  "comparison_purpose": "evidence_hygiene_and_structure_risk_only",
+  "provider_dispatch_allowed": false,
+  "expected_missing_assets": 25,
+  "expected_provider_dispatch_count": 0
+}

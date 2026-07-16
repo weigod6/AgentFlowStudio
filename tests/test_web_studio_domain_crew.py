@@ -273,7 +273,7 @@ def test_domain_crew_surface_preserves_api_authority_and_mobile_accessibility_co
     assert "domainCrewMutationsDisabled(state)" in panel
     assert panel.count("domainCrewMutationsDisabled(state)") >= 5
     assert "所有写操作已锁定" in panel
-    assert 'ariaLabel: "数字剧组控制台"' in panel
+    assert 'ariaLabel: "制作团队控制台"' in panel
     assert 'initialFocus: ".domain-crew-close"' in panel
     assert "overflow-y: auto" in styles
     assert "overscroll-behavior: contain" in styles

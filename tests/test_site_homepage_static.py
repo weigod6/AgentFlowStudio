@@ -28,7 +28,7 @@ def test_site_homepage_is_distinct_from_studio_workspace() -> None:
     assert "studio-wall" in index
     assert "wall-node director" in index
     assert "Production Spine" not in index
-    assert "数字剧组" in index
+    assert "制作团队" in index
     assert "主创决策" in index
     assert "审核与交付" in index
     assert "社交广场" not in index

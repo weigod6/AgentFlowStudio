@@ -395,12 +395,17 @@ def build_keyframe_generation(
                         elapsed_ms=_elapsed_ms(started),
                     )
             else:
-                manifest, retry_count = dispatch_provider_with_retry(
-                    registry,
-                    "image",
-                    request.provider_service_id,
-                    dispatch_request,
-                )
+                retry_disabled = bool((request.node_parameters or {}).get("disable_provider_retry"))
+                if retry_disabled:
+                    manifest = registry.dispatch("image", request.provider_service_id, dispatch_request)
+                    retry_count = 0
+                else:
+                    manifest, retry_count = dispatch_provider_with_retry(
+                        registry,
+                        "image",
+                        request.provider_service_id,
+                        dispatch_request,
+                    )
                 provider_elapsed_ms = _elapsed_ms(provider_started)
                 provider_outputs = _provider_outputs(manifest)
                 blocks.extend(_provider_manifest_blocks(manifest, required_gate, request.candidate_count, len(provider_outputs)))

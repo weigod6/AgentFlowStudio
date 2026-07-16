@@ -36,7 +36,7 @@ export function openDomainCrewPanel(controller) {
   const titleBlock = el("div", "domain-crew-title-block");
   titleBlock.append(
     el("span", "domain-crew-kicker", "AFS DOMAIN CREW"),
-    el("h2", "", "数字剧组"),
+    el("h2", "", "制作团队"),
     el("p", "", "以项目 API 权威状态协调九类制作角色、交接、主创裁决与变更复确认。"),
   );
   header.append(titleBlock, closeButton);
@@ -45,7 +45,7 @@ export function openDomainCrewPanel(controller) {
 
   let unsubscribe = () => {};
   const close = showModal(modal, {
-    ariaLabel: "数字剧组控制台",
+    ariaLabel: "制作团队控制台",
     initialFocus: ".domain-crew-close",
     onClose: () => {
       unsubscribe();
@@ -65,7 +65,7 @@ function renderPanel(body, controller, state) {
   body.appendChild(boundaryBanner(state));
   if (state.error) body.appendChild(errorBanner(state.error, () => controller.load().catch(() => {})));
   if (state.status === "loading" && !state.crew) {
-    body.appendChild(emptyNotice("正在读取数字剧组权威状态…"));
+    body.appendChild(emptyNotice("正在读取制作团队权威状态…"));
     return;
   }
   if (state.status === "missing") {
@@ -73,7 +73,7 @@ function renderPanel(body, controller, state) {
     return;
   }
   if (!state.crew) {
-    body.appendChild(emptyNotice("当前项目尚无可显示的数字剧组状态。"));
+    body.appendChild(emptyNotice("当前项目尚无可显示的制作团队状态。"));
     return;
   }
   const crew = state.crew;
@@ -388,9 +388,9 @@ function section(title, description, content) {
 
 function createCrewGate(controller, state) {
   const gate = el("div", "domain-crew-empty-gate");
-  gate.append(el("h3", "", "为当前项目建立数字剧组"), el("p", "", "初始化后将创建编剧、分镜、美术、导演、连续性、质检、音频、剪辑与交付九类认证角色。"));
+  gate.append(el("h3", "", "为当前项目建立制作团队"), el("p", "", "初始化后将创建编剧、分镜、美术、导演、连续性、质检、音频、剪辑与交付九类认证角色。"));
   const input = textInput("crew_id", `crew-${sanitizeId(state.projectId || "project")}`);
-  const button = el("button", "primary-btn", "初始化数字剧组");
+  const button = el("button", "primary-btn", "初始化制作团队");
   button.type = "button";
   button.dataset.action = "create-domain-crew";
   button.disabled = domainCrewMutationsDisabled(state);

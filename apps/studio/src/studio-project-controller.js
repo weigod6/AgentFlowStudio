@@ -122,7 +122,11 @@ export function createProjectController({ store, getRuntime, setRuntime, render,
       const projectId = safeProjectId(`studio-${Date.now()}-${suffix}`);
       const projectName = name.trim() || "AFS Studio project";
       const nextRuntime = createRuntimeClient(projectId);
-      await createProjectWithRetry(nextRuntime, { project_id: projectId, goal: projectName });
+      await createProjectWithRetry(nextRuntime, {
+        project_id: projectId,
+        project_type: "studio_episode_production",
+        goal: projectName,
+      });
       await applyProject(projectId, nextRuntime, { projectName, syncAssets: false });
       return true;
     } catch (error) {

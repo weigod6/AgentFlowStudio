@@ -48,6 +48,7 @@ export function renderTopbar(options) {
   } else {
     topbar.appendChild(siteHomeLink(onBeforeSiteHome));
     topbar.appendChild(studioHomeButton(onOpenHome));
+    topbar.appendChild(productionControlLink(runtime?.projectId));
     appendProjectControls(topbar, { runtime, projectOptions, hiddenProjectCount, showAllProjects, onToggleProjectFilter, onSwitchProject, onCreateProject });
   }
 
@@ -60,7 +61,7 @@ export function renderTopbar(options) {
 }
 
 function renderCompactTopbar(topbar, options) {
-  const { state, store, projectOptions, onOpenHome, onBeforeSiteHome } = options;
+  const { state, store, runtime, projectOptions, onOpenHome, onBeforeSiteHome } = options;
   const openDrawer = el("button", "icon-btn drawer-restore");
   openDrawer.innerHTML = icon("panel", 15);
   openDrawer.title = "展开侧栏";
@@ -70,6 +71,7 @@ function renderCompactTopbar(topbar, options) {
   topbar.appendChild(el("div", "topbar-logo", "AFS"));
   topbar.appendChild(siteHomeLink(onBeforeSiteHome));
   topbar.appendChild(studioHomeButton(onOpenHome));
+  topbar.appendChild(productionControlLink(runtime?.projectId));
 
   const title = el("div", "topbar-title compact-project");
   title.appendChild(el("span", "proj-name", state.meta.projectName));
@@ -101,6 +103,18 @@ function studioHomeButton(onOpenHome) {
   home.setAttribute("aria-label", "返回制作总览");
   home.addEventListener("click", onOpenHome);
   return home;
+}
+
+function productionControlLink(projectId) {
+  const href = projectId
+    ? `/studio/production-control/?project=${encodeURIComponent(projectId)}`
+    : "/studio/production-control/";
+  const link = el("a", "icon-btn studio-home-btn production-control-btn");
+  link.href = href;
+  link.innerHTML = `${icon("bolt", 14)}<span>制片工作台</span>`;
+  link.title = "打开制片工作台";
+  link.setAttribute("aria-label", "打开制片工作台");
+  return link;
 }
 
 function accountButton(user, onSignOut) {

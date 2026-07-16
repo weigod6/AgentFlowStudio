@@ -1,6 +1,6 @@
 # AFS AOS Current State
 
-Last updated: 2026-07-08.
+Last updated: 2026-07-15.
 
 This file is the compact startup surface for AgentFlow Studio under AOS v1.
 Long trackers, devlogs, and handoff archives are not active startup state. Use
@@ -12,7 +12,7 @@ historical record.
 AgentFlow Studio is an Agent-native production operating layer for AI content
 production.
 
-Current user-facing product surface:
+Current implemented user-facing product surface:
 
 ```text
 /studio/ canvas -> Runtime Service -> prompt optimization -> fixed visual assets
@@ -22,6 +22,18 @@ Current user-facing product surface:
 Current stage: local internal testing and hardening. Do not claim SaaS readiness,
 public release readiness, provider QA, generated-media QA, human acceptance, or
 business validation from repository/document changes.
+
+The active product program is the creator-controlled single-episode production
+loop in [AFS_EPISODE_LOOP_PROGRAM.md](AFS_EPISODE_LOOP_PROGRAM.md). The existing
+canvas and representative-episode paths are implementation inputs, not the
+authority for the new domain fact chain. The implemented Project/Episode shell,
+storyboard workspace, and contextual inspector are retained as a
+`review_and_recovery_workspace_candidate`: they prove authenticated fact review,
+typed mutations, and recovery, but not the complete AI-native production control
+surface from creator intent through Agent decomposition/parallel execution,
+progress/cost/blockers, and artifact writeback. The candidate is not final
+frontend authority. Await the next control-thread Task Packet; do not reopen a
+simple canvas-versus-non-canvas vote or invent another direction locally.
 
 ## Local Repo Surface
 

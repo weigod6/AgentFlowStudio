@@ -79,13 +79,16 @@ function isLocalHost(hostname) {
   return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]";
 }
 
-async function requestJson(route, { method = "GET", payload = null, meta = null } = {}) {
+async function requestJson(route, { method = "GET", payload = null, meta = null, headers: extraHeaders = null } = {}) {
   const requestMeta = buildRequestMeta(route, method, payload, meta);
   const headers = { "Content-Type": "application/json", Accept: "application/json" };
   headers["X-Client-Request-ID"] = requestMeta.client_request_id;
   if (requestMeta.user_action) headers["X-User-Action"] = requestMeta.user_action;
   if (requestMeta.node_id) headers["X-Studio-Node-ID"] = requestMeta.node_id;
   if (requestMeta.node_type) headers["X-Studio-Node-Type"] = requestMeta.node_type;
+  for (const [name, value] of Object.entries(extraHeaders || {})) {
+    if (value != null && String(value).trim()) headers[name] = String(value);
+  }
   const token = authToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   let response;
@@ -357,6 +360,9 @@ function inferUserAction(route, method) {
   if (/\/human-gate-decisions$/.test(route) && method === "POST") return "record_human_gate_decision";
   if (/\/accepted-generation-plan-packets\/preview$/.test(route) && method === "POST") return "preview_accepted_generation_plan_packet";
   if (/\/production-runs$/.test(route) && method === "POST") return "create_production_run";
+  if (/\/commercial-production\/sample$/.test(route) && method === "POST") return "create_commercial_production_sample";
+  if (/\/commercial-production\/stage-gate\/lock$/.test(route) && method === "POST") return "lock_commercial_production_scope";
+  if (/\/commercial-production\/revision-requests\/local-rewrite$/.test(route) && method === "POST") return "request_commercial_production_local_rewrite";
   if (/\/domain-crew\/tasks\/[^/]+\/claim$/.test(route) && method === "POST") return "claim_domain_crew_task";
   if (/\/domain-crew\/tasks$/.test(route) && method === "POST") return "create_domain_crew_task";
   if (/\/domain-crew\/messages$/.test(route) && method === "POST") return "send_domain_crew_message";
@@ -639,6 +645,100 @@ export function createRuntimeClient(projectId = "studio-local-001") {
       const payload = { state };
       if (expectedVersion) payload.expected_version = expectedVersion;
       return requestJson(`/projects/${encoded}/studio-state`, { method: "PUT", payload });
+    },
+    loadEpisodeWorkspace(episodeId, episodeVersionId) {
+      const episode = encodeURIComponent(episodeId);
+      const version = encodeURIComponent(episodeVersionId);
+      return requestJson(`/projects/${encoded}/episodes/${episode}/versions/${version}/workspace`);
+    },
+    executeEpisodeCommand(payload, idempotencyKey) {
+      return requestJson(`/projects/${encoded}/episode-production-aggregate/commands`, {
+        method: "POST",
+        payload,
+        headers: { "Idempotency-Key": idempotencyKey },
+      });
+    },
+    getProductionControl() {
+      return requestJson(`/projects/${encoded}/production-control`);
+    },
+    getCreatorGoldenTrial() {
+      return requestJson(`/projects/${encoded}/creator-golden-trial`);
+    },
+    getCommercialProduction() {
+      return requestJson(`/projects/${encoded}/commercial-production`);
+    },
+    createCommercialProductionSample(payload, idempotencyKey) {
+      return requestJson(`/projects/${encoded}/commercial-production/sample`, {
+        method: "POST",
+        payload,
+        headers: { "Idempotency-Key": idempotencyKey },
+      });
+    },
+    lockCommercialProductionStageGate(payload, idempotencyKey) {
+      return requestJson(`/projects/${encoded}/commercial-production/stage-gate/lock`, {
+        method: "POST",
+        payload,
+        headers: { "Idempotency-Key": idempotencyKey },
+      });
+    },
+    requestCommercialProductionLocalRewrite(payload, idempotencyKey) {
+      return requestJson(`/projects/${encoded}/commercial-production/revision-requests/local-rewrite`, {
+        method: "POST",
+        payload,
+        headers: { "Idempotency-Key": idempotencyKey },
+      });
+    },
+    recordCreatorGoldenTrialMission(payload, idempotencyKey) {
+      return requestJson(`/projects/${encoded}/creator-golden-trial/mission`, {
+        method: "POST",
+        payload,
+        headers: { "Idempotency-Key": idempotencyKey },
+      });
+    },
+    approveCreatorGoldenTrial(payload, idempotencyKey) {
+      return requestJson(`/projects/${encoded}/creator-golden-trial/approve`, {
+        method: "POST",
+        payload,
+        headers: { "Idempotency-Key": idempotencyKey },
+      });
+    },
+    dispatchCreatorGoldenTrialNext(payload, idempotencyKey) {
+      return requestJson(`/projects/${encoded}/creator-golden-trial/dispatch-next`, {
+        method: "POST",
+        payload,
+        headers: { "Idempotency-Key": idempotencyKey },
+      });
+    },
+    recordProductionControlMission(payload, idempotencyKey) {
+      return requestJson(`/projects/${encoded}/production-control/mission`, {
+        method: "POST",
+        payload,
+        headers: { "Idempotency-Key": idempotencyKey },
+      });
+    },
+    saveProductionControlPlan(payload, idempotencyKey) {
+      return requestJson(`/projects/${encoded}/production-control/plan`, {
+        method: "POST",
+        payload,
+        headers: { "Idempotency-Key": idempotencyKey },
+      });
+    },
+    approveProductionControlPlan(payload, idempotencyKey) {
+      return requestJson(`/projects/${encoded}/production-control/plan/approve`, {
+        method: "POST",
+        payload,
+        headers: { "Idempotency-Key": idempotencyKey },
+      });
+    },
+    runProductionControlAction(runId, payload, idempotencyKey) {
+      return requestJson(`/projects/${encoded}/production-control/runs/${encodeURIComponent(runId)}/actions`, {
+        method: "POST",
+        payload,
+        headers: { "Idempotency-Key": idempotencyKey },
+      });
+    },
+    rebuildProductionControl() {
+      return requestJson(`/projects/${encoded}/production-control/integrity/rebuild`, { method: "POST" });
     },
     spriteChat(payload) {
       return requestJson(`/projects/${encoded}/sprite/chat`, { method: "POST", payload });

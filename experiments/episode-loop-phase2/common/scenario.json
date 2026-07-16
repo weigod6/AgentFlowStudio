@@ -1,0 +1,66 @@
+{
+  "schema_version": "afs_episode_loop_phase2_scenario.v0.1",
+  "scenario_id": "rainlight-same-task-v1",
+  "truth_constraints": {
+    "shot_count": 15,
+    "duration_seconds": 135,
+    "missing_asset_count": 25,
+    "provider_dispatch_count": 0,
+    "playable_preview_available": false
+  },
+  "overlays": [
+    {
+      "overlay_id": "wrong-scene-shot-006",
+      "target": "shot-006",
+      "kind": "scene_assignment_error",
+      "incorrect_scene": "scene-rain-alley",
+      "expected_scene": "scene-archive-tower"
+    },
+    {
+      "overlay_id": "continuity-conflict-shot-007",
+      "target": "shot-007",
+      "kind": "continuity_conflict",
+      "violations": [
+        "lamp-buckle-wrong-shoulder",
+        "mirrored-left-brow-scar"
+      ]
+    },
+    {
+      "overlay_id": "continuity-decoy-shot-008",
+      "target": "shot-008",
+      "kind": "continuity_decoy",
+      "expected_action": "leave_unchanged"
+    }
+  ],
+  "revision_task": {
+    "target": "shot-011",
+    "from_version": "shot-011-v1",
+    "selected_version": "shot-011-v2",
+    "unchanged_shot_count": 14,
+    "affected_downstream_count": 8,
+    "reload_after_reconfirmed_count": 3,
+    "expected_final_reconfirmed_count": 8
+  },
+  "tasks": [
+    {
+      "task_id": "orientation",
+      "goal": "identify_next_useful_action"
+    },
+    {
+      "task_id": "repair_scene_split",
+      "goal": "restore_shot_006_scene"
+    },
+    {
+      "task_id": "resolve_continuity",
+      "goal": "resolve_shot_007_without_flagging_shot_008"
+    },
+    {
+      "task_id": "compare_recover_reconfirm",
+      "goal": "select_shot_011_v2_and_recover_3_of_8_checkpoint"
+    },
+    {
+      "task_id": "inspect_blocked_delivery",
+      "goal": "explain_25_missing_assets_without_fake_media"
+    }
+  ]
+}

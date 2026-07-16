@@ -11,7 +11,7 @@ def test_product_shell_is_chinese_first_and_hides_diagnostics_from_primary_flow(
     i18n = (STUDIO / "src" / "i18n.js").read_text(encoding="utf-8")
     index = (STUDIO / "index.html").read_text(encoding="utf-8")
 
-    for label in ("工作空间", "项目", "单集", "数字剧组", "审核", "交付", "制作总览", "待主创决策", "剧组动态", "交付准备度"):
+    for label in ("工作空间", "项目", "单集", "制作团队", "审核", "交付", "制作总览", "待主创决策", "剧组动态", "交付准备度"):
         assert label in i18n
     assert 'return localStorage.getItem(STORAGE_KEY) === "en" ? "en" : "zh-CN"' in i18n
     assert "runtime-status" not in shell

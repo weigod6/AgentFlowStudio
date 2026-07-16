@@ -41,7 +41,7 @@ function domainCrewEntry() {
   const button = el("button", "domain-crew-entry");
   button.type = "button";
   button.dataset.action = "open-domain-crew";
-  button.append(el("span", "", "数字剧组"), el("small", "", "9 个专业岗位"));
+  button.append(el("span", "", "制作团队"), el("small", "", "9 个专业岗位"));
   button.addEventListener("click", () => window.dispatchEvent(new CustomEvent("afs:studio-open-domain-crew")));
   return button;
 }

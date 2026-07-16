@@ -259,7 +259,7 @@ def _crew_summary(crew: dict[str, Any]) -> dict[str, Any]:
     for task in active[:6]:
         role = role_by_agent.get(str(task.get("assigned_agent_id") or ""), "")
         activities.append({
-            "role": ROLE_LABELS.get(role, "数字剧组"),
+            "role": ROLE_LABELS.get(role, "制作助手"),
             "responsibility": _safe_text(task.get("objective"), 140) or "等待下一步制作任务",
             "state": _localized_task_status(str(task.get("status") or "")),
         })
