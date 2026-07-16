@@ -109,6 +109,76 @@ const PROP_REFERENCE_TERMS = [
   "地图",
   "钥匙",
 ];
+const GENERIC_PROP_NOUN_TERMS = [
+  "数学试卷",
+  "试卷",
+  "草稿纸",
+  "纸张",
+  "启事",
+  "寻狗启事",
+  "照片",
+  "信件",
+  "信封",
+  "手机",
+  "钥匙",
+  "地图",
+  "竹简",
+  "虎符",
+  "军旗",
+  "残旗",
+  "旗",
+  "断戟",
+  "戟",
+  "剑",
+  "刀",
+  "枪",
+  "弓",
+  "棍",
+  "棒",
+  "网球",
+  "球",
+  "红绳",
+  "牵引绳",
+  "狗绳",
+  "绳",
+  "毛线团",
+  "纸盒",
+  "纸箱",
+  "香炉",
+  "面包",
+  "耳机线",
+  "雨伞",
+  "伞",
+];
+const KEY_PROP_ACTION_TERMS = [
+  "手持",
+  "死攥",
+  "攥",
+  "握",
+  "拿",
+  "捧",
+  "叼",
+  "吐",
+  "顶",
+  "拾起",
+  "翻转",
+  "展开",
+  "散开",
+  "露出",
+  "震颤",
+  "嗡鸣",
+  "照亮",
+  "反射",
+  "检查",
+  "查看",
+  "写着",
+  "批注",
+  "锁定",
+  "递",
+  "撑着",
+  "放在",
+  "压住",
+];
 
 export function normalizeAssetExtractionRefs(assetRefs, options = {}) {
   const context = cleanText(options.context || "");
@@ -375,15 +445,52 @@ function visualPropNames(text) {
   for (const term of [...PROP_REFERENCE_TERMS].sort((a, b) => b.length - a.length)) {
     if (source.includes(term)) names.push(cleanPropLabel(term));
   }
+  names.push(...genericVisualPropNames(source));
   const objectRe = /(?:半截|半枚|一卷|一张|一只|一柄|一根|那柄|那张|那只|那截)?([\u4e00-\u9fffA-Za-z0-9·]{0,8}(?:断戟|青铜虎符|虎符|竹简|军旗|残旗|军籍册|试卷|草稿纸|寻狗启事|启事|网球|红绳|牵引绳|狗绳|毛线团|金箍棒|钢爪|地图|钥匙))/gu;
   for (const match of source.matchAll(objectRe)) names.push(cleanPropLabel(match[1]));
   return dedupeNonOverlapping(names.filter(Boolean)).slice(0, 4);
 }
 
+function genericVisualPropNames(text) {
+  const source = String(text || "");
+  if (!source) return [];
+  const nounPattern = [...GENERIC_PROP_NOUN_TERMS].sort((a, b) => b.length - a.length).map(escapeRegExp).join("|");
+  const contextPrefix = "(?:手中|手里|嘴里|怀里|脚边|身旁|面前|指尖|掌心|画面中|镜头中|叼着|吐出|吐在|捧着|拿着|握着|攥着|撑着|拾起|翻转|露出|放在|顶了顶|压住|反射|写着|批注)";
+  const genericRe = new RegExp(`${contextPrefix}[^。！？!?；;]{0,18}?((?:[\\u4e00-\\u9fff]{0,8})?(?:${nounPattern}))`, "gu");
+  const names = [];
+  for (const match of source.matchAll(genericRe)) {
+    const name = cleanPropLabel(match[1]);
+    if (name && !isAnimalAliasName(name, source)) names.push(name);
+  }
+  const measureRe = new RegExp(`(?:一|半|那|这|其)?(?:个|只|张|卷|枚|截|根|柄|把|块|团|盒|箱)?((?:[\\u4e00-\\u9fff]{0,8})?(?:${nounPattern}))`, "gu");
+  for (const match of source.matchAll(measureRe)) {
+    const start = Math.max(0, match.index - 16);
+    const end = Math.min(source.length, match.index + match[0].length + 16);
+    const window = source.slice(start, end);
+    if (KEY_PROP_ACTION_TERMS.some((term) => window.includes(term)) || /手中|手里|嘴里|怀里|脚边|面前|画面|镜头/.test(window)) {
+      const name = cleanPropLabel(match[1]);
+      if (name && !isAnimalAliasName(name, source)) names.push(name);
+    }
+  }
+  return dedupeNonOverlapping(names.filter(Boolean));
+}
+
+function isAnimalAliasName(label, text) {
+  const clean = escapeRegExp(String(label || "").trim());
+  if (!clean) return false;
+  const animalPattern = [...ANIMAL_REFERENCE_TERMS].sort((a, b) => b.length - a.length).map(escapeRegExp).join("|");
+  return new RegExp(`(?:${animalPattern})[“"']${clean}[”"']`, "iu").test(String(text || ""));
+}
+
 function cleanPropLabel(value) {
-  const clean = String(value || "").replace(/^(?:磨损严重的|湿透|褪色|发光|半截|半枚|一卷|一张|一只|一柄|一根|那柄|那张|那只|那截)+/, "").trim();
+  const clean = String(value || "")
+    .replace(/^(?:叼着|吐出|吐在|捧着|拿着|握着|攥着|撑着|拾起|翻转|露出|放在|顶了顶|压住|反射|写着|批注|捏着|磨损严重的|没吃完的|湿漉漉的|湿透的|湿透|褪色的|褪色|发光的|发光|半截|半枚|一卷|一张|一只|一柄|一根|一块|一团|一盒|一箱|那柄|那张|那只|那截|那根|这根|这张|这只)+/, "")
+    .trim();
   const term = [...PROP_REFERENCE_TERMS].sort((a, b) => b.length - a.length).find((item) => item && clean.includes(item));
-  return (term || clean).slice(0, 24);
+  if (term) return term.slice(0, 24);
+  const genericTerm = [...GENERIC_PROP_NOUN_TERMS].sort((a, b) => b.length - a.length).find((item) => item && clean.endsWith(item));
+  if (genericTerm) return clean.slice(Math.max(0, clean.length - genericTerm.length - 8), clean.length).slice(0, 24);
+  return clean.slice(0, 24);
 }
 
 function dedupeNonOverlapping(values) {
@@ -488,4 +595,8 @@ function slug(value) {
 
 function isAscii(value) {
   return /^[\x00-\x7F]+$/.test(value);
+}
+
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

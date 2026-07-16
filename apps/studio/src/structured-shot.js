@@ -188,6 +188,7 @@ function isKeyPropRef(ref) {
   const source = String(ref?.source || "").toLowerCase();
   if (!label) return false;
   if (KEY_PROP_LABELS.has(label) && (evidence.includes(label) || source.includes("explicit") || ["mentioned", "prop_relevant", "key_prop"].includes(status))) return true;
+  if (["mentioned", "prop_relevant", "key_prop"].includes(status) && evidence.includes(label)) return true;
   return KEY_PROP_ACTION_RE.test(`${label} ${evidence}`) && PROP_HINTS.some((term) => label.includes(term));
 }
 

@@ -82,6 +82,47 @@ PROP_REFERENCE_TERMS = (
     "武器",
     "道具",
 )
+GENERIC_PROP_NOUN_TERMS = (
+    "数学试卷",
+    "试卷",
+    "草稿纸",
+    "纸张",
+    "启事",
+    "寻狗启事",
+    "照片",
+    "信件",
+    "信封",
+    "手机",
+    "钥匙",
+    "地图",
+    "竹简",
+    "虎符",
+    "军旗",
+    "残旗",
+    "旗",
+    "断戟",
+    "戟",
+    "剑",
+    "刀",
+    "枪",
+    "弓",
+    "棍",
+    "棒",
+    "网球",
+    "球",
+    "红绳",
+    "牵引绳",
+    "狗绳",
+    "绳",
+    "毛线团",
+    "纸盒",
+    "纸箱",
+    "香炉",
+    "面包",
+    "耳机线",
+    "雨伞",
+    "伞",
+)
 KEY_PROP_ACTION_TERMS = (
     "手持",
     "死攥",
@@ -591,6 +632,7 @@ def _visual_prop_names(text: str) -> list[str]:
     for term in terms:
         if term and term in source:
             names.append(_clean_prop_label(term))
+    names.extend(_generic_visual_prop_names(source))
     object_pattern = re.compile(
         r"(?:半截|半枚|一卷|一张|一只|一柄|一根|那柄|那张|那只|那截)?([\u4e00-\u9fffA-Za-z0-9·]{0,8}(?:断戟|青铜虎符|虎符|竹简|军旗|残旗|军籍册|试卷|草稿纸|寻狗启事|启事|网球|红绳|牵引绳|狗绳|毛线团|金箍棒|钢爪|地图|钥匙))"
     )
@@ -598,11 +640,58 @@ def _visual_prop_names(text: str) -> list[str]:
     return _dedupe_non_overlapping([name for name in names if name])[:4]
 
 
+def _generic_visual_prop_names(text: str) -> list[str]:
+    source = str(text or "")
+    if not source:
+        return []
+    noun_pattern = "|".join(re.escape(term) for term in sorted(GENERIC_PROP_NOUN_TERMS, key=len, reverse=True))
+    context_prefix = (
+        r"(?:手中|手里|嘴里|怀里|脚边|身旁|面前|指尖|掌心|画面中|镜头中|"
+        r"叼着|吐出|吐在|捧着|拿着|握着|攥着|撑着|拾起|翻转|露出|放在|顶了顶|压住|反射|写着|批注)"
+    )
+    generic_re = re.compile(
+        rf"(?:{context_prefix})[^\u3002\uff01\uff1f!?；;]{{0,18}}?"
+        rf"((?:[\u4e00-\u9fff]{{0,8}})?(?:{noun_pattern}))"
+    )
+    names = [
+        name
+        for match in generic_re.finditer(source)
+        if (name := _clean_prop_label(match.group(1))) and not _is_animal_alias_name(name, source)
+    ]
+    measure_re = re.compile(
+        rf"(?:一|半|那|这|其)?(?:个|只|张|卷|枚|截|根|柄|把|块|团|盒|箱)?"
+        rf"((?:[\u4e00-\u9fff]{{0,8}})?(?:{noun_pattern}))"
+    )
+    for match in measure_re.finditer(source):
+        window = source[max(0, match.start() - 16) : min(len(source), match.end() + 16)]
+        if _contains_any(window, KEY_PROP_ACTION_TERMS) or re.search(r"手中|手里|嘴里|怀里|脚边|面前|画面|镜头", window):
+            name = _clean_prop_label(match.group(1))
+            if name and not _is_animal_alias_name(name, source):
+                names.append(name)
+    return _dedupe_non_overlapping([name for name in names if name])
+
+
+def _is_animal_alias_name(label: str, text: str) -> bool:
+    clean = re.escape(str(label or "").strip())
+    if not clean:
+        return False
+    animal_pattern = "|".join(re.escape(term) for term in sorted(ANIMAL_REFERENCE_TERMS, key=len, reverse=True))
+    return bool(re.search(rf"(?:{animal_pattern})[“\"']{clean}[”\"']", str(text or ""), flags=re.I))
+
+
 def _clean_prop_label(value: str) -> str:
-    clean = re.sub(r"^(?:磨损严重的|湿透|褪色|发光|半截|半枚|一卷|一张|一只|一柄|一根|那柄|那张|那只|那截)+", "", str(value or "")).strip()
+    clean = re.sub(
+        r"^(?:叼着|吐出|吐在|捧着|拿着|握着|攥着|撑着|拾起|翻转|露出|放在|顶了顶|压住|反射|写着|批注|捏着|"
+        r"磨损严重的|没吃完的|湿漉漉的|湿透的|湿透|褪色的|褪色|发光的|发光|半截|半枚|一卷|一张|一只|一柄|一根|一块|一团|一盒|一箱|那柄|那张|那只|那截|那根|这根|这张|这只)+",
+        "",
+        str(value or ""),
+    ).strip()
     for term in sorted((*KEY_PROP_LABEL_TERMS, *PROP_REFERENCE_TERMS), key=len, reverse=True):
         if term and term in clean:
             return term[:24]
+    for term in sorted(GENERIC_PROP_NOUN_TERMS, key=len, reverse=True):
+        if term and clean.endswith(term):
+            return clean[-min(len(clean), len(term) + 8) :][:24]
     return clean[:24]
 
 

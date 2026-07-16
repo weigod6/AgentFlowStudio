@@ -3,36 +3,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from apps.api.runtime_asset_extraction import principal_asset_refs_with_diagnostics
+from apps.api.runtime_storyboard_asset_coverage import reconcile_storyboard_asset_coverage
 from apps.api.runtime_storyboard_provider_text import clean_text as _clean
 
 
 def reconcile_cross_shot_asset_refs(shots: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    recent_animals: dict[str, dict[str, Any]] = {}
-    for shot in shots:
-        refs = list(shot.get("asset_refs") or [])
-        text = _shot_context_text(shot)
-        if _mentions_dog_coreference(text):
-            if ref := recent_animals.get("dog"):
-                refs = _drop_generic_animal_refs(refs, "dog")
-                if not _has_animal_ref(refs, "dog"):
-                    refs.append(_coreference_ref(ref, text))
-        if _mentions_cat_coreference(text):
-            if ref := recent_animals.get("cat"):
-                refs = _drop_generic_animal_refs(refs, "cat")
-                if not _has_animal_ref(refs, "cat"):
-                    refs.append(_coreference_ref(ref, text))
-        refs, dropped_refs = principal_asset_refs_with_diagnostics(
-            refs,
-            list(shot.get("dropped_asset_ref_diagnostics") or []),
-        )
-        shot["asset_refs"] = refs
-        shot["dropped_asset_ref_diagnostics"] = dropped_refs
-        for ref in refs:
-            species = _animal_ref_species(ref)
-            if species:
-                recent_animals[species] = ref
-    return shots
+    return reconcile_storyboard_asset_coverage(shots)
 
 
 def _shot_context_text(shot: dict[str, Any]) -> str:

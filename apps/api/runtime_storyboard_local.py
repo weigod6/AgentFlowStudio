@@ -13,6 +13,7 @@ from apps.api.runtime_storyboard_grounding import (
     storyboard_source_span,
     unsupported_additions_for_description,
 )
+from apps.api.runtime_storyboard_asset_coverage import reconcile_storyboard_asset_coverage
 from apps.api.runtime_storyboard_planning import storyboard_plan_fields
 
 
@@ -58,7 +59,7 @@ def local_storyboard_shots(script_text: str, shot_count_hint: int | None = None)
     chunks = _script_chunks(script_text, shot_count_hint=shot_count_hint)
     global_refs = _asset_refs(source)
     total_count = len(chunks[:80])
-    return [
+    shots = [
         structured_shot(
             chunk,
             index + 1,
@@ -69,6 +70,7 @@ def local_storyboard_shots(script_text: str, shot_count_hint: int | None = None)
         )
         for index, chunk in enumerate(chunks[:80])
     ]
+    return reconcile_storyboard_asset_coverage(shots)
 
 
 def structured_shot(
@@ -119,14 +121,13 @@ def structured_shot(
 def _resolve_shot_refs(source: str, refs: list[dict[str, Any]], global_refs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     named_characters = [ref for ref in global_refs if ref["asset_type"] == "character" and ref["label"] not in GENERIC_CHARACTER_LABELS]
     named_scenes = [ref for ref in global_refs if ref["asset_type"] == "scene" and ref["label"] not in GENERIC_SCENE_LABELS]
-    if named_characters and (
-        any(ref["asset_type"] == "character" and ref["label"] in GENERIC_CHARACTER_LABELS for ref in refs)
-        or re.search(r"两人|二人|双方|对方|他们|她们|主角|主体", source)
-        or any(ref["label"] in source for ref in named_characters)
-    ):
+    has_generic_character_ref = any(ref["asset_type"] == "character" and ref["label"] in GENERIC_CHARACTER_LABELS for ref in refs)
+    has_group_coreference = bool(re.search(r"两人|二人|双方|对方|他们|她们|主角|主体", source))
+    if named_characters and (has_generic_character_ref or has_group_coreference or any(ref["label"] in source for ref in named_characters)):
         refs = [ref for ref in refs if ref["asset_type"] != "character" or ref["label"] not in GENERIC_CHARACTER_LABELS]
         for ref in named_characters[:3]:
-            _push_ref(refs, ref["label"], "character", "context", source)
+            if ref["label"] in source or (has_generic_character_ref and len(named_characters) == 1):
+                _push_ref(refs, ref["label"], "character", "context", source)
     if named_scenes and any(ref["asset_type"] == "scene" and ref["label"] in GENERIC_SCENE_LABELS for ref in refs):
         refs = [ref for ref in refs if ref["asset_type"] != "scene" or ref["label"] not in GENERIC_SCENE_LABELS]
         _push_ref(refs, named_scenes[0]["label"], "scene", "context", source)
@@ -382,6 +383,8 @@ def _character_subtype_for_label(label: str, context: str) -> str:
         return ""
     if _is_animal_entity_label(clean):
         return "animal"
+    if _looks_like_human_action_label(clean, source):
+        return ""
     animal_pattern = "|".join(re.escape(item) for item in ANIMAL_ENTITY_LABELS)
     if re.search(rf"({animal_pattern})[“\"]{re.escape(clean)}[”\"]", source):
         return "animal"
@@ -392,6 +395,16 @@ def _character_subtype_for_label(label: str, context: str) -> str:
     if "机器人" in clean or ("机器人" in source and clean in source):
         return "robot"
     return ""
+
+
+def _looks_like_human_action_label(label: str, source: str) -> bool:
+    return bool(
+        re.search(
+            rf"{re.escape(label)}[^\u3002\uff01\uff1f!?]{{0,18}}"
+            r"(?:蹲|站|坐|跪|抬头|低头|回头|喉结|手指|指尖|目光|眼神|肩|校服|口袋|手机|试卷|说|喊|追|走|跑)",
+            source,
+        )
+    )
 
 
 def _is_animal_entity_label(label: str) -> bool:

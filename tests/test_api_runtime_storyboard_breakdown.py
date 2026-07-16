@@ -185,6 +185,50 @@ def test_storyboard_local_fallback_does_not_fabricate_generic_people_or_mountain
     assert all(not str(shot["description"]).startswith("@") for shot in shots)
 
 
+def test_storyboard_local_fallback_reconciles_pronoun_assets_without_future_props() -> None:
+    script = (
+        "暴雨如注，古战场泥泞翻涌，沈砚单膝陷在泥中，死攥半截断戟。"
+        "他喉结剧烈滚动，下颌绷紧欲吼，却只呛出一口黑血。"
+        "他咬牙撑戟欲起，断戟忽震，戟尖泥下赫然露出半枚青铜虎符。"
+    )
+
+    shots = local_storyboard_shots(script, shot_count_hint=3)
+    shot1_refs = {(ref["label"], ref["asset_type"]) for ref in shots[0]["asset_refs"]}
+    shot2_refs = {(ref["label"], ref["asset_type"]) for ref in shots[1]["asset_refs"]}
+    shot3_refs = {(ref["label"], ref["asset_type"]) for ref in shots[2]["asset_refs"]}
+
+    assert ("沈砚", "character") in shot1_refs
+    assert ("古战场", "scene") in shot1_refs
+    assert ("断戟", "prop") in shot1_refs
+    assert ("青铜虎符", "prop") not in shot1_refs
+    assert ("沈砚", "character") in shot2_refs
+    assert ("古战场", "scene") in shot2_refs
+    assert ("沈砚", "character") in shot3_refs
+    assert ("断戟", "prop") in shot3_refs
+    assert ("青铜虎符", "prop") in shot3_refs
+
+
+def test_storyboard_local_fallback_resolves_animal_and_prop_coreference_generically() -> None:
+    script = (
+        "小华蹲在梧桐树影斑驳的公园长椅旁，指尖捏着半块没吃完的面包。"
+        "一只黑色拉布拉多突然从斜坡草甸冲下，嘴里牢牢叼着一只磨损严重的荧光绿网球。"
+        "那狗直直朝她奔来，在距她拖鞋鞋尖三十厘米处骤然刹住，球被轻轻吐在拖鞋边。"
+    )
+
+    shots = local_storyboard_shots(script, shot_count_hint=3)
+    shot2_refs = {ref["label"]: ref for ref in shots[1]["asset_refs"]}
+    shot3_refs = {ref["label"]: ref for ref in shots[2]["asset_refs"]}
+
+    assert "小华" in {ref["label"] for ref in shots[0]["asset_refs"]}
+    assert "黑色拉布拉多" in shot2_refs
+    assert shot2_refs["黑色拉布拉多"]["character_subtype"] == "animal"
+    assert "斜坡草甸" in {ref["label"] for ref in shots[1]["asset_refs"] if ref["asset_type"] == "scene"}
+    assert "荧光绿网球" in {ref["label"] for ref in shots[1]["asset_refs"] if ref["asset_type"] == "prop"}
+    assert "黑色拉布拉多" in shot3_refs
+    assert shot3_refs["黑色拉布拉多"]["source"] in {"context", "cross_shot_coreference"}
+    assert "荧光绿网球" in {ref["label"] for ref in shots[2]["asset_refs"] if ref["asset_type"] == "prop"}
+
+
 def test_storyboard_breakdown_returns_asset_graph_with_cross_shot_evidence(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("AFS_ALLOW_REMOTE_LLM", raising=False)
     client = TestClient(create_runtime_app(runtime_root=tmp_path))
@@ -409,6 +453,8 @@ def test_storyboard_breakdown_uses_llm_structured_json_when_gate_open(tmp_path, 
     assert "显示字段语言约束" in provider_prompt
     assert "不要在显示字段输出英文摄影、光影、声音术语" in provider_prompt
     assert "主体优先约束" in provider_prompt
+    assert "资产覆盖审计" in provider_prompt
+    assert "回指判定" in provider_prompt
     assert "asset_ref.evidence_text 必须是 source_span.text" in provider_prompt
     assert "storyboard_shot_numbering_handoff_v1" in provider_prompt
     assert payload["provider_calls_started"] is True
