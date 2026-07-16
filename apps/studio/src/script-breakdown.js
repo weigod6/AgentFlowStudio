@@ -101,7 +101,12 @@ export async function splitTextNodeToStoryboardNodes(store, node, runtime = null
   const x = fresh.x + fresh.w + 180;
   const bindingGraph = assetAutoBindingGraph(breakdown.asset_auto_binding_graph);
   for (const [index, shot] of shots.entries()) {
-    const structuredShot = refineStructuredShotAssets(normalizeStoryboardShot(shot, index + 1), source);
+    const allowLocalAssetInference = breakdown.mode === "local_fallback";
+    const structuredShot = refineStructuredShotAssets(
+      normalizeStoryboardShot(shot, index + 1),
+      allowLocalAssetInference ? source : "",
+      { inferMissingAssets: allowLocalAssetInference },
+    );
     const shotText = structuredShotText(structuredShot);
     const shotNode = createNode(store, "script", x, fresh.y + index * 230);
     const referenceStack = nodeReferenceStackForGraphBoundAssets(bindingGraph, structuredShot, shotNode.id);
@@ -421,7 +426,8 @@ function normalizeStoryboardShot(shot, fallbackIndex) {
   if (typeof shot === "string") return structuredShotFromSegment(shot, fallbackIndex);
   const source = String(shot?.source_text || shot?.description || "").trim();
   const fallback = structuredShotFromSegment(source, fallbackIndex);
-  const normalizedAssets = Array.isArray(shot?.asset_refs) && shot.asset_refs.length
+  const hasExplicitAssetRefs = Array.isArray(shot?.asset_refs);
+  const normalizedAssets = hasExplicitAssetRefs
     ? normalizeShotAssetRefsWithDiagnostics(
         shot.asset_refs.map((asset, index) => normalizeAssetRef(asset, index)).filter(Boolean),
         source || String(shot?.description || ""),

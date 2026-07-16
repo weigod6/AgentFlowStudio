@@ -99,7 +99,7 @@ function visualAssetFromSuggestion(graph, suggestion) {
 }
 
 function suggestionMatchesShotRef(suggestion, refs) {
-  if (!refs.length) return true;
+  if (!refs.length) return false;
   const graphAssetId = safeToken(suggestion.graph_asset_id);
   const assetType = safeAssetType(suggestion.asset_type);
   const labelKey = normalizedLabel(suggestion.label);

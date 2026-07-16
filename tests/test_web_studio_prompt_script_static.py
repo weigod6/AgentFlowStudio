@@ -743,6 +743,147 @@ process.stdout.write(JSON.stringify({ created, node: state.nodes.text_1, shot: s
     assert "煤球" in payload["shot"]["prompt"]
 
 
+def test_storyboard_breakdown_preserves_empty_runtime_asset_refs_without_global_pollution() -> None:
+    script = r'''
+import { splitTextNodeToStoryboardNodes } from "./apps/studio/src/script-breakdown.js";
+
+const rainScript = "《雨痕》高中生小红站在空荡校门口屋檐外。远处教学楼顶，闪电劈亮整片灰云。";
+const cleanShotDescription = "特写试卷背面：小红缓缓翻转试卷，露出密密麻麻补写的演算字迹；最后一行手写：“第12题，其实可以换种思路。”墨迹未干，在湿纸上微微晕散。";
+const state = {
+  nodes: {
+    text_1: {
+      id: "text_1",
+      type: "text",
+      prompt: rainScript,
+      content: rainScript,
+      params: {},
+      status: "complete",
+      x: 0,
+      y: 0,
+      w: 280,
+      h: 280,
+    },
+  },
+  edges: {},
+  order: ["text_1"],
+  assets: [],
+  groups: {},
+  selection: { nodeIds: ["text_1"], edgeId: null },
+  ui: {},
+};
+const store = {
+  get: () => state,
+  set: (mutator) => mutator(state),
+  nextId: (prefix) => `${prefix}_${Object.keys(state.nodes).length + 1}`,
+};
+const runtime = {
+  breakdownStoryboard: async () => ({
+    provider_calls_started: true,
+    fallback_visible_to_user: false,
+    safe_manifest: { status: "provider_structured", fallback_visible_to_user: false },
+    asset_auto_binding_graph: {
+      artifact_type: "agentflow_asset_auto_binding_graph",
+      algorithm_id: "test",
+      binding_suggestions: [
+        {
+          binding_id: "bind_xiaohong",
+          binding_state: "bound",
+          graph_asset_id: "graph:character:小红",
+          fixed_visual_asset_id: "asset_xiaohong",
+          asset_type: "character",
+          label: "小红",
+          confidence: 1,
+        },
+        {
+          binding_id: "bind_rooftop",
+          binding_state: "bound",
+          graph_asset_id: "graph:scene:屋顶平台",
+          fixed_visual_asset_id: "asset_rooftop",
+          asset_type: "scene",
+          label: "屋顶平台",
+          confidence: 1,
+        },
+      ],
+    },
+    shots: [{
+      shot_id: "S05",
+      index: 5,
+      duration: "2.2",
+      description: cleanShotDescription,
+      shot_size: "特写",
+      light_atmosphere: "阴天漫射光",
+      camera_motion: "缓慢下移聚焦最后一行字",
+      dialogue: "第12题，其实可以换种思路。",
+      sound: "纸页翻转窸窣声",
+      asset_refs: [],
+      dropped_asset_ref_diagnostics: [
+        { label: "数学试卷", asset_type: "prop", reason: "prop_requires_manual_asset_entry" },
+      ],
+    }],
+  }),
+};
+const created = await splitTextNodeToStoryboardNodes(store, state.nodes.text_1, runtime);
+const shot = state.nodes[created[0]];
+process.stdout.write(JSON.stringify({ created, shot }));
+'''
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    payload = json.loads(completed.stdout)
+    shot = payload["shot"]
+    structured = shot["params"]["structuredShot"]
+
+    assert len(payload["created"]) == 1
+    assert structured["asset_refs"] == []
+    assert shot["params"]["shotAssetRefs"] == []
+    assert "无明确可固定资产" in shot["prompt"]
+    assert "@可见人物" not in shot["prompt"]
+    assert "@屋顶平台" not in shot["prompt"]
+    assert "@小红" not in structured["description"]
+    assert "@屋顶平台" not in structured["description"]
+    assert "nodeReferenceStack" not in shot["params"]
+
+
+def test_asset_auto_binding_does_not_match_empty_shot_refs_to_every_asset() -> None:
+    script = r'''
+import { nodeReferenceStackForGraphBoundAssets } from "./apps/studio/src/asset-auto-binding-refs.js";
+
+const graph = {
+  artifact_type: "agentflow_asset_auto_binding_graph",
+  algorithm_id: "test",
+  binding_suggestions: [{
+    binding_id: "bind_xiaohong",
+    binding_state: "bound",
+    graph_asset_id: "graph:character:小红",
+    fixed_visual_asset_id: "asset_xiaohong",
+    asset_type: "character",
+    label: "小红",
+    confidence: 1,
+  }],
+};
+const empty = nodeReferenceStackForGraphBoundAssets(graph, { asset_refs: [] }, "shot_empty");
+const matched = nodeReferenceStackForGraphBoundAssets(graph, {
+  asset_refs: [{ graph_asset_id: "graph:character:小红", asset_type: "character", label: "小红" }],
+}, "shot_match");
+process.stdout.write(JSON.stringify({ empty, matched }));
+'''
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    payload = json.loads(completed.stdout)
+
+    assert payload["empty"] is None
+    assert payload["matched"]["summary"]["asset_auto_binding_reference_count"] == 1
+
+
 def test_idea_expansion_fallback_outputs_formal_script_not_storyboard_template() -> None:
     script = r'''
 import { expandTextIdeaToScript } from "./apps/studio/src/script-breakdown.js";

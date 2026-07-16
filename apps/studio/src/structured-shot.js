@@ -62,7 +62,7 @@ export function structuredShotFromFormattedText(text, index) {
 export function structuredShotText(shot) {
   const assetLine = shot.asset_refs.length
     ? shot.asset_refs.map(assetRefDisplay).join("、")
-    : "@主角、@主要场景";
+    : "无明确可固定资产";
   return [
     `镜号：${String(shot.index).padStart(2, "0")}`,
     `时长：${shot.duration}`,
@@ -97,12 +97,13 @@ export function normalizeShotAssetRefsWithDiagnostics(assetRefs, context = "") {
   return principalAssetExtraction(normalizeAssetExtractionRefs(Array.isArray(assetRefs) ? assetRefs : [], { context }));
 }
 
-export function refineStructuredShotAssets(shot, context = "") {
+export function refineStructuredShotAssets(shot, context = "", options = {}) {
   if (!shot || typeof shot !== "object") return shot;
-  const source = [shot.description, shot.source_text, context].filter(Boolean).join("\n");
+  const inferMissingAssets = options.inferMissingAssets !== false;
+  const source = [shot.description, shot.source_text, inferMissingAssets ? context : ""].filter(Boolean).join("\n");
   const extraction = Array.isArray(shot.asset_refs) && shot.asset_refs.length
     ? principalAssetExtraction(normalizeAssetExtractionRefs(shot.asset_refs, { context: source, includeInferred: true }))
-    : extractShotAssetExtraction(source);
+    : (inferMissingAssets ? extractShotAssetExtraction(source) : { asset_refs: [], dropped_asset_ref_diagnostics: [] });
   const refs = extraction.asset_refs;
   return {
     ...shot,
