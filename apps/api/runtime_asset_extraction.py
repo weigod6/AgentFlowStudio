@@ -5,6 +5,7 @@ from typing import Any
 
 
 ASSET_TYPES = {"character", "scene", "prop"}
+CHARACTER_SUBTYPES = {"human", "animal", "robot", "subject"}
 GENERIC_CHARACTER_LABELS = {"人", "人物", "主角", "角色", "主体"}
 GENERIC_SCENE_LABELS = {"场景", "主要场景"}
 PRONOUN_LABELS = {"他", "她", "它", "他们", "她们", "ta", "they", "he", "she"}
@@ -191,27 +192,28 @@ def normalize_asset_ref_for_contract(
         visual_span = (evidence or context_text)[:240]
     evidence_modality = "visual"
 
-    return (
-        {
-            "label": display_name,
-            "display_name": display_name,
-            "asset_id": str(asset.get("asset_id") or f"candidate:{asset_type}:{_slug(display_name)}"),
-            "graph_asset_id": str(asset.get("graph_asset_id") or asset.get("graphAssetId") or ""),
-            "asset_type": asset_type,
-            "status": str(asset.get("status") or "candidate"),
-            "source": str(asset.get("source") or "candidate"),
-            "scope": str(asset.get("scope") or "shot_tree"),
-            "confidence": _confidence(asset.get("confidence"), provisional_name=provisional_name),
-            "evidence_text": (visual_span or evidence or context_text)[:240],
-            "descriptive_signature": _descriptive_signature(asset, visual_span or evidence or context_text),
-            "evidence_modality": evidence_modality,
-            "visual_evidence_span": visual_span,
-            "modality_gate_status": "accepted",
-            "name_source": name_source,
-            "provisional_name": provisional_name,
-        },
-        None,
-    )
+    normalized = {
+        "label": display_name,
+        "display_name": display_name,
+        "asset_id": str(asset.get("asset_id") or f"candidate:{asset_type}:{_slug(display_name)}"),
+        "graph_asset_id": str(asset.get("graph_asset_id") or asset.get("graphAssetId") or ""),
+        "asset_type": asset_type,
+        "status": str(asset.get("status") or "candidate"),
+        "source": str(asset.get("source") or "candidate"),
+        "scope": str(asset.get("scope") or "shot_tree"),
+        "confidence": _confidence(asset.get("confidence"), provisional_name=provisional_name),
+        "evidence_text": (visual_span or evidence or context_text)[:240],
+        "descriptive_signature": _descriptive_signature(asset, visual_span or evidence or context_text),
+        "evidence_modality": evidence_modality,
+        "visual_evidence_span": visual_span,
+        "modality_gate_status": "accepted",
+        "name_source": name_source,
+        "provisional_name": provisional_name,
+    }
+    character_subtype = _character_subtype(asset.get("character_subtype"))
+    if asset_type == "character" and character_subtype:
+        normalized["character_subtype"] = character_subtype
+    return normalized, None
 
 
 def _inferred_asset_refs(context: str) -> list[dict[str, Any]]:
@@ -425,6 +427,11 @@ def _descriptive_signature(asset: dict[str, Any], fallback: str) -> str:
 def _asset_type(value: Any) -> str:
     asset_type = str(value or "").strip()
     return asset_type if asset_type in ASSET_TYPES else "character"
+
+
+def _character_subtype(value: Any) -> str:
+    subtype = str(value or "").strip()
+    return subtype if subtype in CHARACTER_SUBTYPES else ""
 
 
 def _confidence(value: Any, *, provisional_name: bool = False) -> float:

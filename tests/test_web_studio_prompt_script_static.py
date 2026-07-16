@@ -660,6 +660,89 @@ process.stdout.write(JSON.stringify({ created, node: state.nodes.text_1, node_co
     assert "小明有一只猫" in payload["node"]["prompt"]
 
 
+def test_storyboard_breakdown_runtime_local_fallback_is_visible_to_tester() -> None:
+    script = r'''
+import { splitTextNodeToStoryboardNodes } from "./apps/studio/src/script-breakdown.js";
+
+const state = {
+  nodes: {
+    text_1: {
+      id: "text_1",
+      type: "text",
+      prompt: "小明蹲在老城区巷口，橘猫“煤球”叼回一只湿漉漉的奶狗。",
+      content: "小明蹲在老城区巷口，橘猫“煤球”叼回一只湿漉漉的奶狗。",
+      params: {},
+      status: "complete",
+      x: 0,
+      y: 0,
+      w: 280,
+      h: 280,
+    },
+  },
+  edges: {},
+  order: ["text_1"],
+  assets: [],
+  groups: {},
+  selection: { nodeIds: ["text_1"], edgeId: null },
+  ui: {},
+};
+const store = {
+  get: () => state,
+  set: (mutator) => mutator(state),
+  nextId: (prefix) => `${prefix}_${Object.keys(state.nodes).length + 1}`,
+};
+const runtime = {
+  breakdownStoryboard: async () => ({
+    provider_calls_started: false,
+    fallback_visible_to_user: true,
+    fallback_reason: "llm_gate_blocked",
+    fallback_message: "LLM gate 未开启，已使用本地保守分镜；结果需要人工复核后再继续资产识别。",
+    safe_manifest: {
+      status: "local_fallback",
+      fallback_visible_to_user: true,
+      fallback_reason: "llm_gate_blocked",
+      fallback_message: "LLM gate 未开启，已使用本地保守分镜；结果需要人工复核后再继续资产识别。",
+    },
+    shots: [{
+      shot_id: "shot_01",
+      index: 1,
+      duration: "6s",
+      description: "@小明 @煤球 @奶狗 @老城区巷口。小明蹲在老城区巷口，橘猫“煤球”叼回一只湿漉漉的奶狗。",
+      shot_size: "中景",
+      light_atmosphere: "自然光影",
+      camera_motion: "固定机位",
+      dialogue: "无明确对白",
+      sound: "环境底噪",
+      asset_refs: [
+        { label: "小明", asset_type: "character", status: "candidate", source: "candidate" },
+        { label: "煤球", asset_type: "character", character_subtype: "animal", status: "candidate", source: "candidate" },
+        { label: "奶狗", asset_type: "character", character_subtype: "animal", status: "candidate", source: "candidate" },
+        { label: "老城区巷口", asset_type: "scene", status: "candidate", source: "candidate" },
+      ],
+    }],
+  }),
+};
+const created = await splitTextNodeToStoryboardNodes(store, state.nodes.text_1, runtime);
+process.stdout.write(JSON.stringify({ created, node: state.nodes.text_1, shot: state.nodes[created[0]] }));
+'''
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    payload = json.loads(completed.stdout)
+
+    assert len(payload["created"]) == 1
+    assert payload["node"]["status"] == "complete"
+    assert payload["node"]["params"]["storyboardBreakdownState"]["status"] == "fallback"
+    assert payload["node"]["params"]["storyboardBreakdown"]["fallback_reason"] == "llm_gate_blocked"
+    assert payload["node"]["params"]["generationPolicyStatus"] == "needs_attention"
+    assert "LLM gate" in payload["node"]["params"]["generationBlockedReason"]
+    assert "煤球" in payload["shot"]["prompt"]
+
+
 def test_idea_expansion_fallback_outputs_formal_script_not_storyboard_template() -> None:
     script = r'''
 import { expandTextIdeaToScript } from "./apps/studio/src/script-breakdown.js";

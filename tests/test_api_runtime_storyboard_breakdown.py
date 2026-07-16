@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from agentflow_studio.model_gateway.errors import ModelProviderError
 from apps.api.openapi_export import export_openapi_schema
 from apps.api.runtime_errors import response_contains_unsafe_marker
 from apps.api.runtime_service import create_runtime_app
@@ -41,6 +42,9 @@ def test_storyboard_breakdown_gate_closed_uses_safe_local_fallback(tmp_path, mon
     assert payload["job"]["action"] == "storyboard_breakdown"
     assert payload["provider_calls_started"] is False
     assert payload["safe_manifest"]["status"] == "local_fallback"
+    assert payload["safe_manifest"]["fallback_visible_to_user"] is True
+    assert payload["safe_manifest"]["fallback_reason"] == "llm_gate_blocked"
+    assert "LLM gate" in payload["safe_manifest"]["fallback_message"]
     assert payload["safe_manifest"]["raw_provider_response_stored"] is False
     assert payload["safe_manifest"]["asset_nodes_created"] is False
     assert payload["safe_manifest"]["knowledgebase_version"] == "creative_prompt_knowledgebase_v1"
@@ -123,6 +127,29 @@ def test_storyboard_local_fallback_does_not_treat_bluestone_steps_as_battlefield
 
     assert "山巅石台战场" not in serialized
     assert ("老城区巷口", "scene") in first_refs
+
+
+def test_storyboard_local_fallback_keeps_named_people_animals_and_aliases_out_of_dialogue() -> None:
+    script = (
+        "片名：《猫捡到狗那天》 小明蹲在老城区巷口的青石台阶上，指尖沾着猫粮碎屑，"
+        "怀里橘猫“煤球”正用肉垫按他手腕——它刚叼回一只湿漉漉的奶狗，狗耳朵还滴着水，"
+        "爪子悬在半空蹬踹。阳光斜切过晾衣绳，把猫耳尖和狗鼻头照得发亮。"
+        "小明喉结滚动，手指僵在半空，没敢碰那团颤抖的温热；"
+        "他目光从奶狗缺耳的左耳滑向煤球绷紧的后颈。"
+    )
+
+    shots = local_storyboard_shots(script)
+    first = shots[0]
+    first_refs = {(ref["label"], ref["asset_type"]) for ref in first["asset_refs"]}
+    refs_by_label = {ref["label"]: ref for ref in first["asset_refs"]}
+
+    assert first["dialogue"] == "无明确对白"
+    assert ("小明", "character") in first_refs
+    assert ("煤球", "character") in first_refs
+    assert ("奶狗", "character") in first_refs
+    assert ("老城区巷口", "scene") in first_refs
+    assert refs_by_label["煤球"]["character_subtype"] == "animal"
+    assert refs_by_label["奶狗"]["character_subtype"] == "animal"
 
 
 def test_storyboard_local_fallback_still_recognizes_mountain_battlefield() -> None:
@@ -612,8 +639,56 @@ def test_storyboard_breakdown_keeps_provider_started_when_llm_json_is_discarded(
     payload = response.json()
     assert payload["provider_calls_started"] is True
     assert payload["safe_manifest"]["status"] == "local_fallback"
+    assert payload["safe_manifest"]["fallback_visible_to_user"] is True
+    assert payload["safe_manifest"]["fallback_reason"] == "provider_output_discarded"
+    assert "LLM 输出未被采用" in payload["safe_manifest"]["fallback_message"]
     assert payload["safe_manifest"]["raw_provider_response_stored"] is False
     assert payload["safe_manifest"]["discard_reason"]
+    assert payload["shots"]
+
+
+def test_storyboard_breakdown_marks_provider_call_failure_as_visible_fallback(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AFS_ALLOW_REMOTE_LLM", "true")
+
+    class Descriptor:
+        modality = "llm"
+
+    class FakeRegistry:
+        _descriptors = {"prompt_optimizer": Descriptor()}
+
+        def dispatch(self, capability, service_id, request):
+            raise ModelProviderError("temporary provider unavailable")
+
+    monkeypatch.setattr("apps.api.runtime_storyboard_breakdown.load_provider_registry", lambda: FakeRegistry())
+    client = TestClient(create_runtime_app(runtime_root=tmp_path))
+    client.post(
+        "/projects",
+        json={
+            "project_id": "proj_storyboard_provider_failed",
+            "project_type": "short_video_campaign",
+            "goal": "Create a visual story from a complete script.",
+        },
+    )
+
+    response = client.post(
+        "/projects/proj_storyboard_provider_failed/storyboard-breakdowns",
+        json={
+            "node_id": "text_001",
+            "script_text": "小明蹲在老城区巷口，橘猫“煤球”叼回一只湿漉漉的奶狗。",
+            "target_platform": "short_video",
+            "style": "cinematic",
+            "node_parameters": {"llm_provider": "prompt_optimizer"},
+            "generated_at": "2026-07-16T10:08:00+08:00",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider_calls_started"] is False
+    assert payload["fallback_visible_to_user"] is True
+    assert payload["fallback_reason"] == "provider_call_failed"
+    assert payload["safe_manifest"]["fallback_reason"] == "provider_call_failed"
+    assert "provider 调用失败" in payload["safe_manifest"]["fallback_message"]
     assert payload["shots"]
 
 

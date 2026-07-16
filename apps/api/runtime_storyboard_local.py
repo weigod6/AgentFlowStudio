@@ -20,6 +20,27 @@ ASSET_RE = re.compile(r"@([A-Za-z0-9_\-\u4e00-\u9fff·]+)")
 SCENE_HINTS = ("主要场景", "场景", "办公室", "房间", "街道", "巷口", "窄巷", "巷子", "青石台阶", "青砖", "屋顶", "楼顶", "天台", "城市", "天际线", "森林", "海边", "山谷", "山巅", "山脊", "石台", "战场", "云海", "云栈洞口", "洞口", "洞内", "山洞", "餐厅", "车内", "走廊", "宫殿", "庭院", "广场", "屏幕")
 KNOWN_CHARACTER_NAMES = ("唐僧", "白骨精", "孙悟空", "猪八戒", "沙僧", "金刚狼", "林晚")
 CHARACTER_HINTS = ("主角", "角色", "人物", "女孩", "女生", "男孩", "女人", "男人", "老人", "孩子", "机器人", "队长", "老师", "学生", "皇帝", "侦探", *KNOWN_CHARACTER_NAMES)
+ANIMAL_CHARACTER_HINTS = (
+    "橘猫",
+    "流浪猫",
+    "狸花猫",
+    "黑猫",
+    "白猫",
+    "小猫",
+    "猫咪",
+    "奶狗",
+    "小狗",
+    "幼犬",
+    "柴犬幼崽",
+    "柴犬",
+    "狗狗",
+    "猫",
+    "狗",
+    "犬",
+)
+ANIMAL_ENTITY_LABELS = tuple(sorted(ANIMAL_CHARACTER_HINTS, key=len, reverse=True))
+HUMAN_ROLE_LABELS = ("邻居阿姨", "阿姨", "女人", "男人", "男孩", "女孩", "高中生", "学生", "老师", "老人", "孩子")
+SPEECH_VERBS_RE = re.compile(r"(?:说|说道|喊|叫|问|答|低声|大喊|呼喊|喃喃|嘀咕|台词|对白|旁白)")
 PROP_HINTS = ("金箍棒", "手机", "电脑", "键盘", "刀", "剑", "棍", "棒", "车辆", "汽车", "信件", "信封", "信纸", "照片", "路灯", "台灯", "灯具", "灯柱", "书", "门", "地图")
 GENERIC_CHARACTER_LABELS = {"主角", "角色", "人物"}
 GENERIC_SCENE_LABELS = {"主要场景", "场景"}
@@ -180,34 +201,54 @@ def _asset_refs(text: str) -> list[dict[str, Any]]:
         _push_ref(refs, match.group(1), _classify_asset(match.group(1), text), "explicit", text)
     for label in _infer_character_labels(text):
         if not any(ref["asset_type"] == "character" and ref["label"] == label for ref in refs):
-            _push_ref(refs, label, "character", "candidate", text)
+            subtype = _character_subtype_for_label(label, text)
+            _push_ref(
+                refs,
+                label,
+                "character",
+                "grounded_mention" if subtype == "animal" else "candidate",
+                text,
+                character_subtype=subtype,
+            )
     if not any(ref["asset_type"] == "character" for ref in refs) and any(hint in text for hint in CHARACTER_HINTS):
-        _push_ref(refs, _infer_character_label(text) or "主角", "character", "candidate", text)
+        label = _infer_character_label(text) or "主角"
+        _push_ref(refs, label, "character", "candidate", text, character_subtype=_character_subtype_for_label(label, text))
     if not any(ref["asset_type"] == "scene" for ref in refs) and any(hint in text for hint in SCENE_HINTS):
         _push_ref(refs, _infer_scene_label(text) or "主要场景", "scene", "candidate", text)
     if not refs:
-        _push_ref(refs, _infer_character_label(text) or "主角", "character", "candidate", text)
+        label = _infer_character_label(text) or "主角"
+        _push_ref(refs, label, "character", "candidate", text, character_subtype=_character_subtype_for_label(label, text))
         _push_ref(refs, _infer_scene_label(text) or "主要场景", "scene", "candidate", text)
     return refs
 
 
-def _push_ref(refs: list[dict[str, Any]], label: str, asset_type: str, source: str, context: str = "") -> None:
+def _push_ref(
+    refs: list[dict[str, Any]],
+    label: str,
+    asset_type: str,
+    source: str,
+    context: str = "",
+    *,
+    character_subtype: str = "",
+) -> None:
     clean = _semantic_asset_label(label, asset_type, context)
     if not clean or any(ref["label"] == clean for ref in refs):
         return
     evidence = _asset_evidence_for_label(context, clean)
-    refs.append(
-        {
-            "label": clean,
-            "asset_id": f"candidate:{asset_type}:{_indexable_slug(clean)}",
-            "asset_type": asset_type,
-            "status": "mentioned" if source == "explicit" else "candidate",
-            "source": source,
-            "scope": "shot_tree",
-            "confidence": _asset_confidence(asset_type, clean, context),
-            "evidence_text": evidence,
-        }
-    )
+    ref = {
+        "label": clean,
+        "asset_id": f"candidate:{asset_type}:{_indexable_slug(clean)}",
+        "asset_type": asset_type,
+        "status": "mentioned" if source in {"explicit", "grounded_mention"} else "candidate",
+        "source": source,
+        "scope": "shot_tree",
+        "confidence": _asset_confidence(asset_type, clean, context),
+        "evidence_text": evidence,
+    }
+    subtype = character_subtype if character_subtype in {"human", "animal", "robot", "subject"} else ""
+    if asset_type == "character" and subtype:
+        ref["character_subtype"] = subtype
+    refs.append(ref)
 
 
 def _description_with_assets(source: str, refs: list[dict[str, Any]]) -> str:
@@ -268,6 +309,8 @@ def _asset_evidence_for_label(text: str, label: str) -> str:
 def _infer_character_labels(text: str) -> list[str]:
     source = str(text or "")
     labels: list[str] = []
+    for _position, label in _positioned_visible_character_labels(source):
+        _append_label(labels, label)
     for left, right in re.findall(
         r"([\u4e00-\u9fffA-Za-z0-9·]{2,12})(?:大战|对决|迎娶|娶了|娶|嫁给|爱上|遇见|面对|追击|追杀|营救|守护)([\u4e00-\u9fffA-Za-z0-9·]{2,12})",
         source,
@@ -284,6 +327,68 @@ def _infer_character_labels(text: str) -> list[str]:
     for name in _repeated_actor_names(source):
         _append_label(labels, name)
     return labels[:6]
+
+
+def _positioned_visible_character_labels(source: str) -> list[tuple[int, str]]:
+    labels: list[tuple[int, str]] = []
+    aliased_animal_spans: list[tuple[int, int]] = []
+    animal_pattern = "|".join(re.escape(item) for item in ANIMAL_ENTITY_LABELS)
+    for match in re.finditer(rf"({animal_pattern})[“\"]([\u4e00-\u9fffA-Za-z0-9·]{{1,8}})[”\"]", source):
+        aliased_animal_spans.append((match.start(1), match.end(2)))
+        labels.append((match.start(2), match.group(2)))
+    for match in re.finditer(
+        r"(?<![\u4e00-\u9fff])((?:小|阿)[\u4e00-\u9fff]{1,2}?)(?=蹲|站|踮|跃|抬|低|追|愣|伸|转|看|摸|攥|抱|走|跑|说|喊|把|在|的|，|。|；|：|、|——|$)",
+        source,
+    ):
+        label = match.group(1)
+        if not _is_animal_entity_label(label) and label not in {"小狗", "小猫", "小犬"}:
+            labels.append((match.start(1), label))
+    for role in HUMAN_ROLE_LABELS:
+        index = source.find(role)
+        if index >= 0:
+            labels.append((index, role))
+    for label in ANIMAL_ENTITY_LABELS:
+        if len(label) <= 1:
+            continue
+        start = 0
+        while True:
+            index = source.find(label, start)
+            if index < 0:
+                break
+            if not any(span_start <= index <= span_end for span_start, span_end in aliased_animal_spans):
+                labels.append((index, label))
+            start = index + len(label)
+    seen: set[str] = set()
+    result: list[tuple[int, str]] = []
+    for position, label in sorted(labels, key=lambda item: item[0]):
+        if label and label not in seen:
+            seen.add(label)
+            result.append((position, label))
+    return result
+
+
+def _character_subtype_for_label(label: str, context: str) -> str:
+    clean = str(label or "").strip()
+    source = str(context or "")
+    if not clean:
+        return ""
+    if _is_animal_entity_label(clean):
+        return "animal"
+    animal_pattern = "|".join(re.escape(item) for item in ANIMAL_ENTITY_LABELS)
+    if re.search(rf"({animal_pattern})[“\"]{re.escape(clean)}[”\"]", source):
+        return "animal"
+    if re.search(rf"{re.escape(clean)}[^。！？!?]{{0,16}}(?:猫|狗|犬|肉垫|尾巴|爪|耳朵|鼻头|叼|弓背|炸毛|呼噜)", source):
+        return "animal"
+    if re.search(rf"(?:猫|狗|犬|肉垫|尾巴|爪|耳朵|鼻头|叼|弓背|炸毛|呼噜)[^。！？!?]{{0,16}}{re.escape(clean)}", source):
+        return "animal"
+    if "机器人" in clean or ("机器人" in source and clean in source):
+        return "robot"
+    return ""
+
+
+def _is_animal_entity_label(label: str) -> bool:
+    clean = str(label or "").strip()
+    return clean in ANIMAL_CHARACTER_HINTS or any(len(item) > 1 and item in clean for item in ANIMAL_CHARACTER_HINTS)
 
 
 def _infer_character_label(text: str) -> str:
@@ -438,11 +543,30 @@ def _camera_motion(text: str) -> str:
 
 
 def _dialogue(text: str) -> str:
-    quote = re.search(r"[“\"](.*?)[”\"]", text)
-    if quote:
-        return quote.group(1)[:80]
     line = re.search(r"(?:对白|旁白|台词)\s*[:：]\s*(.+)$", text)
-    return line.group(1)[:80] if line else "无明确对白"
+    if line:
+        return line.group(1)[:80]
+    for quote in re.finditer(r"[“\"](.*?)[”\"]", text):
+        if _is_spoken_quote(text, quote):
+            return quote.group(1)[:80]
+    return "无明确对白"
+
+
+def _is_spoken_quote(text: str, quote: re.Match[str]) -> bool:
+    content = quote.group(1).strip()
+    before = text[max(0, quote.start() - 14) : quote.start()]
+    after = text[quote.end() : quote.end() + 10]
+    if not content:
+        return False
+    if SPEECH_VERBS_RE.search(before) or SPEECH_VERBS_RE.match(after.strip()):
+        return True
+    if len(content) <= 4 and _looks_like_alias_quote(before):
+        return False
+    return bool(re.search(r"[，。！？,.!?]|吧|吗|呢|呀|啊|喂|救命|不要|快", content))
+
+
+def _looks_like_alias_quote(before: str) -> bool:
+    return bool(re.search(r"(?:橘猫|流浪猫|狸花猫|黑猫|白猫|小猫|猫咪|猫|奶狗|小狗|幼犬|柴犬幼崽|柴犬|狗狗|狗|犬)\s*$", before))
 
 
 def _sound(text: str) -> str:

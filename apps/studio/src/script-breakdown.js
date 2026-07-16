@@ -131,6 +131,7 @@ export async function splitTextNodeToStoryboardNodes(store, node, runtime = null
   store.set((s) => {
     const sourceNode = s.nodes[fresh.id];
     if (!sourceNode) return;
+    const fallbackNotice = storyboardFallbackNotice(breakdown);
     sourceNode.params.storyboardBreakdown = {
       status: "shots_ready_for_review",
       mode: breakdown.mode,
@@ -145,9 +146,30 @@ export async function splitTextNodeToStoryboardNodes(store, node, runtime = null
       productionGraphArtifactId: breakdown.artifacts?.production_graph_snapshot?.artifact_id || "",
       assetAutoBindingGraph: bindingGraph,
       assetAutoBindingGraphArtifactId: breakdown.artifacts?.asset_auto_binding_graph?.artifact_id || "",
+      fallback_visible_to_user: Boolean(fallbackNotice),
+      fallback_reason: fallbackNotice?.reason || "",
+      fallback_message: fallbackNotice?.message || "",
+      discard_reason: breakdown.discard_reason || breakdown.safe_manifest?.discard_reason || "",
       updated_at: new Date().toISOString(),
     };
-    sourceNode.params.storyboardBreakdownState = { status: "complete", percent: 100, completed_at: new Date().toISOString() };
+    sourceNode.params.storyboardBreakdownState = {
+      status: fallbackNotice ? "fallback" : "complete",
+      percent: 100,
+      label: "分镜拆解",
+      message: fallbackNotice?.message || "",
+      completed_at: new Date().toISOString(),
+    };
+    if (fallbackNotice) {
+      sourceNode.params.generationPolicyStatus = "needs_attention";
+      sourceNode.params.generationStatusDetail = "分镜拆解已生成本地保守结果，但未证明 LLM provider 正常完成。";
+      sourceNode.params.generationBlockedReason = fallbackNotice.message;
+      sourceNode.params.generationNextAction = "检查 LLM gate/provider 配置；继续资产识别前请人工复核分镜主体、资产和对白。";
+    } else {
+      delete sourceNode.params.generationPolicyStatus;
+      delete sourceNode.params.generationStatusDetail;
+      delete sourceNode.params.generationBlockedReason;
+      delete sourceNode.params.generationNextAction;
+    }
     sourceNode.status = "complete";
   });
   return createdIds;
@@ -330,6 +352,12 @@ async function loadStoryboardBreakdown(store, runtime, node, source) {
           shots,
           mode: payload?.safe_manifest?.status || "runtime_storyboard_breakdown",
           provider_calls_started: Boolean(payload?.provider_calls_started),
+          provider_gate: payload?.provider_gate || payload?.safe_manifest?.provider_gate || null,
+          safe_manifest: payload?.safe_manifest || null,
+          fallback_visible_to_user: Boolean(payload?.fallback_visible_to_user || payload?.safe_manifest?.fallback_visible_to_user),
+          fallback_reason: payload?.fallback_reason || payload?.safe_manifest?.fallback_reason || "",
+          fallback_message: payload?.fallback_message || payload?.safe_manifest?.fallback_message || "",
+          discard_reason: payload?.safe_manifest?.discard_reason || "",
           asset_card_candidates: payload?.asset_card_candidates || null,
           production_graph: payload?.production_graph || null,
           asset_auto_binding_graph: payload?.asset_auto_binding_graph || null,
@@ -347,7 +375,41 @@ async function loadStoryboardBreakdown(store, runtime, node, source) {
     shots: splitScriptIntoShots(source).map((segment, index) => structuredShotFromSegment(segment, index + 1)),
     mode: "local_fallback",
     provider_calls_started: false,
+    fallback_visible_to_user: true,
+    fallback_reason: "runtime_unavailable",
+    fallback_message: "Runtime 分镜服务不可用，已使用浏览器本地保守拆分；结果需要人工复核。",
   };
+}
+
+function storyboardFallbackNotice(breakdown) {
+  const manifest = breakdown?.safe_manifest || {};
+  const visible = Boolean(
+    breakdown?.fallback_visible_to_user
+      || manifest.fallback_visible_to_user
+      || breakdown?.mode === "local_fallback",
+  );
+  if (!visible) return null;
+  const reason = String(breakdown?.fallback_reason || manifest.fallback_reason || fallbackReasonFromMode(breakdown?.mode) || "");
+  const message = String(
+    breakdown?.fallback_message
+      || manifest.fallback_message
+      || fallbackMessageForReason(reason, breakdown?.discard_reason || manifest.discard_reason),
+  );
+  return { reason, message };
+}
+
+function fallbackReasonFromMode(mode) {
+  return mode === "local_fallback" ? "local_fallback" : "";
+}
+
+function fallbackMessageForReason(reason, discardReason = "") {
+  if (reason === "llm_gate_blocked") return "LLM gate 未开启，已使用本地保守分镜；结果需要人工复核后再继续资产识别。";
+  if (reason === "provider_call_failed") return "LLM provider 调用失败，已使用本地保守分镜；请检查服务配置或稍后重试。";
+  if (reason === "provider_output_discarded") {
+    return `LLM 输出未被采用，已回退到本地保守分镜；${discardReason ? `原因：${discardReason}` : "原因：provider 输出未通过结构化校验"}。`;
+  }
+  if (reason === "runtime_unavailable") return "Runtime 分镜服务不可用，已使用浏览器本地保守拆分；结果需要人工复核。";
+  return "已使用本地保守分镜；继续前请人工复核分镜主体、资产和对白。";
 }
 
 function normalizeStoryboardShotList(value) {

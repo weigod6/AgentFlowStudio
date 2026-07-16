@@ -18,6 +18,7 @@ from apps.api.runtime_llm_enhancement_dispatch import dispatch_llm_with_fallback
 from apps.api.runtime_llm_enhancement_gate import llm_provider_gate
 from apps.api.runtime_models import StoryboardBreakdownRequest
 from apps.api.runtime_storyboard_artifacts import write_storyboard_artifacts
+from apps.api.runtime_storyboard_fallback import storyboard_fallback_message
 from apps.api.runtime_storyboard_fixed_assets import attach_fixed_visual_asset_refs
 from apps.api.runtime_storyboard_knowledge import (
     knowledge_rule_ids,
@@ -87,6 +88,9 @@ def register_runtime_storyboard_routes(app: FastAPI, store: RuntimeStore) -> Non
             "evidence_ledger": result["evidence_ledger"],
             "provider_gate": result["provider_gate"],
             "provider_calls_started": result["provider_calls_started"],
+            "fallback_reason": result["fallback_reason"],
+            "fallback_message": result["fallback_message"],
+            "fallback_visible_to_user": result["fallback_visible_to_user"],
             "writes_long_term_memory": False,
             "writes_company_kb": False,
             "safe_manifest": result["safe_manifest"],
@@ -110,6 +114,7 @@ def build_storyboard_breakdown(
     shots: list[dict[str, Any]] | None = None
     status = "local_fallback"
     discard_reason = None
+    fallback_reason = "llm_gate_blocked" if gate["status"] == "blocked" else None
     if gate["status"] != "blocked":
         try:
             registry = load_provider_registry()
@@ -126,13 +131,17 @@ def build_storyboard_breakdown(
             discard_reason = _safe_reason(str(exc))
             shots = None
             status = "local_fallback"
+            fallback_reason = "provider_output_discarded" if provider_calls_started else "provider_output_unavailable"
         except ModelGatewayError as exc:
             discard_reason = _safe_reason(str(exc))
             shots = None
             provider_calls_started = False
             status = "local_fallback"
+            fallback_reason = "provider_call_failed"
     if not shots:
         shots = local_storyboard_shots(request.script_text, request.shot_count_hint)
+    fallback_visible_to_user = status == "local_fallback"
+    fallback_message = storyboard_fallback_message(fallback_reason, discard_reason)
     shots = attach_fixed_visual_asset_refs(shots, fixed_visual_assets or [])
     asset_graph = build_asset_graph(shots, source_text=request.script_text, graph_source=f"storyboard_{status}")
     shots = attach_graph_asset_ids_to_shots(shots, asset_graph)
@@ -164,6 +173,9 @@ def build_storyboard_breakdown(
         "status": status,
         "provider_gate": gate,
         "provider_calls_started": provider_calls_started,
+        "fallback_visible_to_user": fallback_visible_to_user,
+        "fallback_reason": fallback_reason,
+        "fallback_message": fallback_message,
         "raw_provider_response_stored": False,
         "generated_media_bytes_stored": False,
         "asset_nodes_created": False,
@@ -217,6 +229,9 @@ def build_storyboard_breakdown(
         "project_id": project_id,
         "node_id": request.node_id,
         "provider_output": provider_calls_started,
+        "fallback_visible_to_user": fallback_visible_to_user,
+        "fallback_reason": fallback_reason,
+        "fallback_message": fallback_message,
         "shots": shots,
         "asset_graph": asset_graph,
         "asset_nodes_created": False,
@@ -234,6 +249,9 @@ def build_storyboard_breakdown(
         "shot_count_hint": request.shot_count_hint,
         "provider_gate": gate,
         "provider_calls_started": provider_calls_started,
+        "fallback_visible_to_user": fallback_visible_to_user,
+        "fallback_reason": fallback_reason,
+        "fallback_message": fallback_message,
         "raw_provider_response_stored": False,
         "knowledgebase_version": storyboard_knowledge["knowledgebase_version"],
         "knowledgebase_registry_hash": storyboard_knowledge["knowledgebase_registry_hash"],
@@ -251,6 +269,9 @@ def build_storyboard_breakdown(
         "shots": shots,
         "provider_gate": gate,
         "provider_calls_started": provider_calls_started,
+        "fallback_reason": fallback_reason,
+        "fallback_message": fallback_message,
+        "fallback_visible_to_user": fallback_visible_to_user,
         "safe_manifest": safe_manifest,
         "safe_artifact": artifact,
         "asset_graph": asset_graph,
