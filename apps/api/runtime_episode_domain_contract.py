@@ -17,9 +17,13 @@ JobState = Literal["queued", "running", "paused", "succeeded", "failed", "cancel
 EntityType = Literal[
     "project",
     "series",
+    "story_bible",
+    "arc",
     "episode",
     "scene",
     "shot",
+    "reference_asset",
+    "reference_set",
     "continuity_state",
     "asset_candidate",
     "selected_version",
@@ -201,6 +205,9 @@ class VersionedFact(EpisodeContractModel):
 class ProjectVersion(VersionedFact):
     entity_type: Literal["project"] = "project"
     title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=4000)
+    creative_intent: str = Field(default="", max_length=4000)
+    ip_profile: str = Field(default="", max_length=4000)
     data_policy: ProjectDataPolicy = Field(default_factory=ProjectDataPolicy)
 
 
@@ -208,12 +215,37 @@ class SeriesVersion(VersionedFact):
     entity_type: Literal["series"] = "series"
     project_ref: EntityVersionRef
     title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=4000)
+    creative_intent: str = Field(default="", max_length=4000)
+
+
+class StoryBibleVersion(VersionedFact):
+    entity_type: Literal["story_bible"] = "story_bible"
+    project_ref: EntityVersionRef
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=8000)
+    world_rules: tuple[str, ...] = Field(default_factory=tuple, max_length=256)
+
+
+class ArcVersion(VersionedFact):
+    entity_type: Literal["arc"] = "arc"
+    series_ref: EntityVersionRef
+    story_bible_ref: EntityVersionRef | None = None
+    sequence: int = Field(ge=1, strict=True)
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=4000)
+    creative_intent: str = Field(default="", max_length=4000)
 
 
 class EpisodeVersion(VersionedFact):
     entity_type: Literal["episode"] = "episode"
     series_ref: EntityVersionRef
+    arc_ref: EntityVersionRef | None = None
+    sequence: int = Field(default=1, ge=1, strict=True)
     title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=4000)
+    creative_intent: str = Field(default="", max_length=4000)
+    reference_set_ref: EntityVersionRef | None = None
 
 
 class SceneVersion(VersionedFact):
@@ -221,15 +253,57 @@ class SceneVersion(VersionedFact):
     episode_ref: EntityVersionRef
     sequence: int = Field(ge=1, strict=True)
     title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=4000)
+    creative_intent: str = Field(default="", max_length=4000)
+    reference_set_ref: EntityVersionRef | None = None
 
 
 class ShotVersion(VersionedFact):
     entity_type: Literal["shot"] = "shot"
     scene_ref: EntityVersionRef
     sequence: int = Field(ge=1, strict=True)
+    title: str = Field(default="未命名镜头", min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=4000)
+    creative_intent: str = Field(default="", max_length=4000)
     duration_seconds: float = Field(gt=0, le=3600)
     continuity_refs: tuple[EntityVersionRef, ...] = Field(default_factory=tuple, max_length=64)
+    reference_set_ref: EntityVersionRef | None = None
     source_proposal_ref: EntityVersionRef | None = None
+
+
+class ReferenceAssetVersion(VersionedFact):
+    entity_type: Literal["reference_asset"] = "reference_asset"
+    project_ref: EntityVersionRef
+    asset_kind: Literal["human", "animal", "scene", "location", "prop", "style", "voice"]
+    label: str = Field(min_length=1, max_length=200)
+    identity: str = Field(min_length=1, max_length=1000)
+    confidence: float = Field(ge=0, le=1)
+    approval_state: Literal["pending_human", "approved", "rejected"] = "pending_human"
+    human_confirmed: bool = False
+
+    @model_validator(mode="after")
+    def approval_is_explicit(self) -> "ReferenceAssetVersion":
+        if self.approval_state == "approved" and not self.human_confirmed:
+            raise ValueError("approved reference asset requires explicit human confirmation")
+        return self
+
+
+class ReferenceSetVersion(VersionedFact):
+    entity_type: Literal["reference_set"] = "reference_set"
+    project_ref: EntityVersionRef
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=4000)
+    scope_kind: Literal["project", "series", "arc", "episode", "scene", "shot"] = "project"
+    scope_refs: tuple[EntityVersionRef, ...] = Field(default_factory=tuple, max_length=256)
+    asset_refs: tuple[EntityVersionRef, ...] = Field(default_factory=tuple, max_length=256)
+    approval_state: Literal["pending_human", "approved", "rejected"] = "pending_human"
+    human_confirmed: bool = False
+
+    @model_validator(mode="after")
+    def approval_is_explicit(self) -> "ReferenceSetVersion":
+        if self.approval_state == "approved" and not self.human_confirmed:
+            raise ValueError("approved reference set requires explicit human confirmation")
+        return self
 
 
 class ContinuityStateVersion(VersionedFact):
@@ -341,9 +415,19 @@ class ProductionProjectAggregate(EpisodeContractModel):
     scope: TenantScope
     projects: tuple[ProjectVersion, ...] = Field(min_length=1, max_length=64)
     series: tuple[SeriesVersion, ...] = Field(default_factory=tuple, max_length=64)
+    story_bibles: tuple[StoryBibleVersion, ...] = Field(default_factory=tuple, max_length=256)
+    arcs: tuple[ArcVersion, ...] = Field(default_factory=tuple, max_length=2048)
     episodes: tuple[EpisodeVersion, ...] = Field(default_factory=tuple, max_length=512)
     scenes: tuple[SceneVersion, ...] = Field(default_factory=tuple, max_length=8192)
     shots: tuple[ShotVersion, ...] = Field(default_factory=tuple, max_length=65536)
+    reference_assets: tuple[ReferenceAssetVersion, ...] = Field(
+        default_factory=tuple,
+        max_length=8192,
+    )
+    reference_sets: tuple[ReferenceSetVersion, ...] = Field(
+        default_factory=tuple,
+        max_length=8192,
+    )
     continuity_states: tuple[ContinuityStateVersion, ...] = Field(default_factory=tuple, max_length=8192)
     asset_candidates: tuple[AssetCandidateVersion, ...] = Field(default_factory=tuple, max_length=65536)
     selections: tuple[SelectedVersion, ...] = Field(default_factory=tuple, max_length=65536)
@@ -465,6 +549,28 @@ class ProductionProjectAggregate(EpisodeContractModel):
                 raise ValueError("reference must resolve inside the aggregate")
             return target
 
+        def reference_set_covers_target(reference_set: VersionedFact, target: VersionedFact) -> bool:
+            allowed = {("project", self.scope.project_id), (target.entity_type, target.entity_id)}
+            current = target
+            while current.entity_type != "project":
+                if isinstance(current, ShotVersion):
+                    current = require(current.scene_ref, ("scene",))
+                elif isinstance(current, SceneVersion):
+                    current = require(current.episode_ref, ("episode",))
+                elif isinstance(current, EpisodeVersion):
+                    current = require(current.arc_ref, ("arc",)) if current.arc_ref else require(current.series_ref, ("series",))
+                elif isinstance(current, ArcVersion):
+                    current = require(current.series_ref, ("series",))
+                elif isinstance(current, (SeriesVersion, StoryBibleVersion, ReferenceAssetVersion, ReferenceSetVersion)):
+                    current = require(current.project_ref, ("project",))
+                else:
+                    break
+                allowed.add((current.entity_type, current.entity_id))
+            return any(
+                (ref.entity_type, ref.entity_id) in allowed
+                for ref in reference_set.scope_refs  # type: ignore[attr-defined]
+            )
+
         for consent in self.consent_records:
             if consent.scope.org_id != self.scope.org_id or consent.scope.project_id != self.scope.project_id:
                 raise ValueError("consent record must remain inside the aggregate tenant and project")
@@ -531,14 +637,64 @@ class ProductionProjectAggregate(EpisodeContractModel):
 
         for item in self.series:
             require(item.project_ref, ("project",))
+        for item in self.story_bibles:
+            require(item.project_ref, ("project",))
+        for item in self.arcs:
+            require(item.series_ref, ("series",))
+            if item.story_bible_ref is not None:
+                require(item.story_bible_ref, ("story_bible",))
         for item in self.episodes:
             require(item.series_ref, ("series",))
+            if item.arc_ref is not None:
+                arc = require(item.arc_ref, ("arc",))
+                if arc.series_ref.entity_id != item.series_ref.entity_id:  # type: ignore[attr-defined]
+                    raise ValueError("episode arc must belong to the selected series")
+            if item.reference_set_ref is not None:
+                reference_set = require(item.reference_set_ref, ("reference_set",))
+                if reference_set.approval_state != "approved":  # type: ignore[attr-defined]
+                    raise ValueError("episode reference set binding requires an approved exact version")
+                if not reference_set_covers_target(reference_set, item):
+                    raise ValueError("episode reference set scope does not include the target")
         for item in self.scenes:
             require(item.episode_ref, ("episode",))
+            if item.reference_set_ref is not None:
+                reference_set = require(item.reference_set_ref, ("reference_set",))
+                if reference_set.approval_state != "approved":  # type: ignore[attr-defined]
+                    raise ValueError("scene reference set binding requires an approved exact version")
+                if not reference_set_covers_target(reference_set, item):
+                    raise ValueError("scene reference set scope does not include the target")
         for item in self.shots:
             require(item.scene_ref, ("scene",))
             for ref in item.continuity_refs:
                 require(ref, ("continuity_state",))
+            if item.reference_set_ref is not None:
+                reference_set = require(item.reference_set_ref, ("reference_set",))
+                if reference_set.approval_state != "approved":  # type: ignore[attr-defined]
+                    raise ValueError("shot reference set binding requires an approved exact version")
+                if not reference_set_covers_target(reference_set, item):
+                    raise ValueError("shot reference set scope does not include the target")
+        for item in self.reference_assets:
+            require(item.project_ref, ("project",))
+        for item in self.reference_sets:
+            require(item.project_ref, ("project",))
+            if len(item.asset_refs) != len(set(item.asset_refs)):
+                raise ValueError("reference set asset refs must be unique")
+            assets = [require(ref, ("reference_asset",)) for ref in item.asset_refs]
+            if item.approval_state == "approved" and any(
+                asset.approval_state != "approved"  # type: ignore[attr-defined]
+                for asset in assets
+            ):
+                raise ValueError("approved reference set requires approved exact asset versions")
+            expected_scope_types = {
+                "project": ("project",),
+                "series": ("series",),
+                "arc": ("arc",),
+                "episode": ("episode",),
+                "scene": ("scene",),
+                "shot": ("shot",),
+            }
+            for ref in item.scope_refs:
+                require(ref, expected_scope_types[item.scope_kind])
         for item in self.continuity_states:
             for ref in item.approved_asset_selection_refs:
                 selection = require(ref, ("selected_version",))
@@ -786,9 +942,13 @@ class ProductionProjectAggregate(EpisodeContractModel):
         return (
             *self.projects,
             *self.series,
+            *self.story_bibles,
+            *self.arcs,
             *self.episodes,
             *self.scenes,
             *self.shots,
+            *self.reference_assets,
+            *self.reference_sets,
             *self.continuity_states,
             *self.asset_candidates,
             *self.selections,
@@ -816,6 +976,7 @@ __all__ = (
     "AggregateMutationCommand",
     "AgentProposal",
     "AssetCandidateVersion",
+    "ArcVersion",
     "ConsentRecord",
     "ContinuityStateVersion",
     "DeliveryVersion",
@@ -827,6 +988,8 @@ __all__ = (
     "ProjectDataPolicy",
     "ProjectVersion",
     "ProviderDataContract",
+    "ReferenceAssetVersion",
+    "ReferenceSetVersion",
     "ReviewDecision",
     "SafeArtifactRef",
     "SceneVersion",
@@ -834,6 +997,7 @@ __all__ = (
     "SeriesVersion",
     "ShotVersion",
     "SourceEvidenceRef",
+    "StoryBibleVersion",
     "TenantScope",
     "is_lifecycle_transition_allowed",
 )

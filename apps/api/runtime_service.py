@@ -30,7 +30,9 @@ from apps.api.runtime_product_read_models import register_runtime_product_read_m
 from apps.api.runtime_production_control import register_runtime_production_control_routes
 from apps.api.runtime_domain_crew import register_runtime_domain_crew_routes
 from apps.api.runtime_episode_bootstrap import (
+    ensure_empty_creator_bootstrap,
     ensure_minimal_episode_bootstrap,
+    should_bootstrap_creator_authoring_project,
     should_bootstrap_episode_project,
 )
 from apps.api.runtime_episode_domain_routes import register_runtime_episode_domain_routes
@@ -181,19 +183,29 @@ def create_runtime_app(
             if user:
                 auth.register_project_owner(body.project_id, str(user["user_id"]))
             episode_bootstrap = None
-            if should_bootstrap_episode_project(body.project_type):
+            if should_bootstrap_episode_project(body.project_type) or should_bootstrap_creator_authoring_project(
+                body.project_type
+            ):
                 actor_id = str(user["user_id"]) if user else LOCAL_ACTOR_ID
                 scope = TenantScope(
                     org_id=str(user["user_id"]) if user else LOCAL_ORG_ID,
                     project_id=body.project_id,
                     actor_id=actor_id,
                 )
-                bootstrap = ensure_minimal_episode_bootstrap(
-                    store,
-                    scope=scope,
-                    title=body.goal,
-                    idempotency_key="project-create-episode-bootstrap-v1",
-                )
+                if should_bootstrap_creator_authoring_project(body.project_type):
+                    bootstrap = ensure_empty_creator_bootstrap(
+                        store,
+                        scope=scope,
+                        title=body.goal,
+                        idempotency_key="project-create-creator-bootstrap-v1",
+                    )
+                else:
+                    bootstrap = ensure_minimal_episode_bootstrap(
+                        store,
+                        scope=scope,
+                        title=body.goal,
+                        idempotency_key="project-create-episode-bootstrap-v1",
+                    )
                 episode_bootstrap = {
                     "created": bootstrap.created,
                     "replayed": bootstrap.replayed,

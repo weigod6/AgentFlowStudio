@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from agentflow.harness.json_io import write_json
+from agentflow.harness.json_io import exclusive_file_lock, write_json
 from apps.api.runtime_auth import RuntimeAuthStore
 from apps.api.runtime_errors import safe_exception_detail
 from apps.api.runtime_production_runs import resolve_project_studio_binding
@@ -33,9 +33,16 @@ def register_runtime_studio_state_routes(app: FastAPI, store: RuntimeStore, auth
                 "state_version": "",
                 "saved_at": "",
             }
-        payload = read_json(path)
-        reject_unsafe_payload(payload)
-        state = payload.get("state") if isinstance(payload.get("state"), dict) else {}
+        try:
+            payload = read_json(path)
+            reject_unsafe_payload(payload)
+            raw_state = payload.get("state") if isinstance(payload.get("state"), dict) else {}
+            state = sanitize_studio_state(raw_state, project_id=project_id)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=safe_exception_detail(exc, "studio_state_recovery_required"),
+            ) from exc
         state = {**state, "production": production_binding}
         return {
             "project_id": project_id,
@@ -59,24 +66,35 @@ def register_runtime_studio_state_routes(app: FastAPI, store: RuntimeStore, auth
             ) from exc
 
         path = _state_path(store, project_id)
-        current_version = _current_state_version(path)
         expected_version = str(body.expected_version or "").strip()
-        if expected_version and current_version and expected_version != current_version:
-            raise HTTPException(status_code=409, detail="studio state version conflict")
+        strict_cas = "creator_authoring" in body.state or bool(expected_version)
+        lock_path = path.with_suffix(".lock")
+        try:
+            with exclusive_file_lock(lock_path):
+                current_version = _current_state_version(path, project_id=project_id)
+                if strict_cas and expected_version != current_version:
+                    raise HTTPException(status_code=409, detail="studio state version conflict")
 
-        saved_at = datetime.now(timezone.utc).isoformat()
-        state_version = _state_version(saved_at)
-        payload = {
-            "artifact_type": "afs_studio_state",
-            "schema_version": "0.2.0",
-            "project_id": project_id,
-            "saved_at": saved_at,
-            "state_version": state_version,
-            "state": state,
-            "does_not_store_secrets": True,
-            "does_not_store_private_asset_bytes": True,
-        }
-        write_json(path, payload)
+                saved_at = datetime.now(timezone.utc).isoformat()
+                state_version = _state_version(saved_at)
+                payload = {
+                    "artifact_type": "afs_studio_state",
+                    "schema_version": "0.2.0",
+                    "project_id": project_id,
+                    "saved_at": saved_at,
+                    "state_version": state_version,
+                    "state": state,
+                    "does_not_store_secrets": True,
+                    "does_not_store_private_asset_bytes": True,
+                }
+                write_json(path, payload)
+        except HTTPException:
+            raise
+        except (ValueError, OSError) as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=safe_exception_detail(exc, "studio_state_recovery_required"),
+            ) from exc
         return {
             "project_id": project_id,
             "source": "runtime",
@@ -97,6 +115,9 @@ def _project_production_binding(
     request: Request,
     project_id: str,
 ) -> dict[str, Any]:
+    manifest = store.ensure_project_manifest(project_id)
+    if manifest.get("project_type") == "studio_creator_authoring":
+        return {}
     owner_user_id = None
     if auth.enabled():
         user = auth.require_user(request)
@@ -106,13 +127,16 @@ def _project_production_binding(
     return resolve_project_studio_binding(store, project_id, owner_user_id=owner_user_id)
 
 
-def _current_state_version(path) -> str:
+def _current_state_version(path, *, project_id: str) -> str:
     if not path.exists():
         return ""
-    try:
-        return _payload_version(read_json(path))
-    except (ValueError, OSError):
-        return ""
+    payload = read_json(path)
+    state = payload.get("state") if isinstance(payload.get("state"), dict) else {}
+    sanitize_studio_state(state, project_id=project_id)
+    version = _payload_version(payload)
+    if not version:
+        raise ValueError("studio state has no recoverable version")
+    return version
 
 
 def _payload_version(payload: dict[str, Any]) -> str:

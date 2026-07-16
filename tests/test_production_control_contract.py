@@ -1332,11 +1332,11 @@ def test_concurrent_same_version_approvals_commit_exactly_one_batch(
 
 def test_frozen_episode_contract_blobs_do_not_drift() -> None:
     expected = {
-        "apps/api/runtime_episode_domain_contract.py": "b37e5ed2e7ac4d182c26b5c79955def956db68c9",
+        "apps/api/runtime_episode_domain_contract.py": "9f943e442f428fc5232e9f6f741fb18cdc673846",
         "apps/api/runtime_episode_domain_store.py": "7bcd1f0925fb7db436f105bd7fd92bb6a8e27370",
         "apps/api/runtime_episode_continuity_service.py": "aa6fad1437c246ab581e93e26b7f2c206380e295",
         "apps/api/runtime_episode_review_delivery_service.py": "79c4dd0ae174c102c3ed36a911c0e805ccf76ba6",
-        "apps/api/runtime_episode_command_routes.py": "8120d11b7c9431ea1517aecc6eb1721ea6f49b3a",
+        "apps/api/runtime_episode_command_routes.py": "91b3607ca35618019383254eb480a1be045d4c99",
         "docs/architecture/AFS_EPISODE_PRODUCTION_FACT_CONTRACT.md": "fc0fa77a50c9b2cf71043ff5d9d190cfbb47cf0d",
     }
     actual = {

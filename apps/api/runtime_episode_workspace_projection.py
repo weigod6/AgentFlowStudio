@@ -29,6 +29,7 @@ from apps.api.runtime_episode_domain_contract import (
 
 
 EPISODE_WORKSPACE_PROJECTION_SCHEMA_VERSION = "afs_episode_workspace_projection.v0.1"
+CREATOR_AUTHORING_PROJECTION_SCHEMA_VERSION = "afs_creator_authoring_workspace.v0.1"
 
 
 class EpisodeWorkspaceProjectionError(RuntimeError):
@@ -41,6 +42,219 @@ class WorkspaceProjectionReferenceError(EpisodeWorkspaceProjectionError):
 
 class WorkspaceProjectionStateError(EpisodeWorkspaceProjectionError):
     pass
+
+
+def build_creator_authoring_projection(
+    aggregate: ProductionProjectAggregate,
+) -> dict[str, Any]:
+    """Project-level authoring read model over the canonical Episode aggregate."""
+
+    canonical = _validated_copy(aggregate)
+    _require_exact_scope(canonical)
+    project = max(canonical.projects, key=lambda item: item.revision)
+    latest_series = _latest_by_entity(canonical.series)
+    latest_bibles = _latest_by_entity(canonical.story_bibles)
+    latest_arcs = tuple(
+        sorted(_latest_by_entity(canonical.arcs), key=lambda item: (item.sequence, item.entity_id))
+    )
+    latest_episodes = tuple(
+        sorted(
+            _latest_by_entity(canonical.episodes),
+            key=lambda item: (item.sequence, item.entity_id),
+        )
+    )
+    latest_scenes = tuple(
+        sorted(
+            _latest_by_entity(canonical.scenes),
+            key=lambda item: (item.episode_ref.entity_id, item.sequence, item.entity_id),
+        )
+    )
+    latest_shots = tuple(
+        sorted(
+            _latest_by_entity(canonical.shots),
+            key=lambda item: (item.scene_ref.entity_id, item.sequence, item.entity_id),
+        )
+    )
+    latest_assets = _latest_by_entity(canonical.reference_assets)
+    latest_sets = _latest_by_entity(canonical.reference_sets)
+
+    for parent_id, records, label in (
+        (series.entity_id, tuple(item for item in latest_arcs if item.series_ref.entity_id == series.entity_id), "arc")
+        for series in latest_series
+    ):
+        del parent_id
+        _require_unique_sequences(records, label)
+    for series in latest_series:
+        _require_unique_sequences(
+            tuple(item for item in latest_episodes if item.series_ref.entity_id == series.entity_id),
+            "episode",
+        )
+    for episode in latest_episodes:
+        _require_unique_sequences(
+            tuple(item for item in latest_scenes if item.episode_ref.entity_id == episode.entity_id),
+            "scene",
+        )
+    for scene in latest_scenes:
+        _require_unique_sequences(
+            tuple(item for item in latest_shots if item.scene_ref.entity_id == scene.entity_id),
+            "shot",
+        )
+
+    projection: dict[str, Any] = {
+        "schema_version": CREATOR_AUTHORING_PROJECTION_SCHEMA_VERSION,
+        "aggregate_version": canonical.aggregate_version,
+        "project": {
+            "ref": _ref(project.as_ref()),
+            "title": project.title,
+            "summary": project.summary,
+            "creative_intent": project.creative_intent,
+            "ip_profile": project.ip_profile,
+            "privacy": "private" if project.data_policy.visibility == "private" else "shared",
+            "trace": {"revision": project.revision, "content_digest": project.content_digest},
+        },
+        "story_bibles": [
+            {
+                "ref": _ref(item.as_ref()),
+                "project_ref": _ref(item.project_ref),
+                "title": item.title,
+                "summary": item.summary,
+                "world_rules": list(item.world_rules),
+                "trace": {"revision": item.revision, "content_digest": item.content_digest},
+            }
+            for item in latest_bibles
+        ],
+        "series": [
+            {
+                "ref": _ref(item.as_ref()),
+                "project_ref": _ref(item.project_ref),
+                "title": item.title,
+                "summary": item.summary,
+                "creative_intent": item.creative_intent,
+                "trace": {"revision": item.revision, "content_digest": item.content_digest},
+            }
+            for item in latest_series
+        ],
+        "arcs": [
+            {
+                "ref": _ref(item.as_ref()),
+                "series_ref": _ref(item.series_ref),
+                "story_bible_ref": _ref(item.story_bible_ref) if item.story_bible_ref else None,
+                "sequence": item.sequence,
+                "title": item.title,
+                "summary": item.summary,
+                "creative_intent": item.creative_intent,
+                "trace": {"revision": item.revision, "content_digest": item.content_digest},
+            }
+            for item in latest_arcs
+        ],
+        "episodes": [
+            {
+                "ref": _ref(item.as_ref()),
+                "series_ref": _ref(item.series_ref),
+                "arc_ref": _ref(item.arc_ref) if item.arc_ref else None,
+                "reference_set_ref": _ref(item.reference_set_ref) if item.reference_set_ref else None,
+                "sequence": item.sequence,
+                "title": item.title,
+                "summary": item.summary,
+                "creative_intent": item.creative_intent,
+                "trace": {"revision": item.revision, "content_digest": item.content_digest},
+            }
+            for item in latest_episodes
+        ],
+        "scenes": [
+            {
+                "ref": _ref(item.as_ref()),
+                "episode_ref": _ref(item.episode_ref),
+                "reference_set_ref": _ref(item.reference_set_ref) if item.reference_set_ref else None,
+                "sequence": item.sequence,
+                "title": item.title,
+                "summary": item.summary,
+                "creative_intent": item.creative_intent,
+                "trace": {"revision": item.revision, "content_digest": item.content_digest},
+            }
+            for item in latest_scenes
+        ],
+        "shots": [
+            {
+                "ref": _ref(item.as_ref()),
+                "scene_ref": _ref(item.scene_ref),
+                "reference_set_ref": _ref(item.reference_set_ref) if item.reference_set_ref else None,
+                "sequence": item.sequence,
+                "title": item.title,
+                "summary": item.summary,
+                "creative_intent": item.creative_intent,
+                "duration_seconds": item.duration_seconds,
+                "lifecycle_state": item.lifecycle_state,
+                "review_state": item.review_state,
+                "versions": [
+                    {
+                        "ref": _ref(version.as_ref()),
+                        "revision": version.revision,
+                        "parent_version_id": version.parent_version_id,
+                        "title": version.title,
+                        "summary": version.summary,
+                        "creative_intent": version.creative_intent,
+                        "duration_seconds": version.duration_seconds,
+                        "reference_set_ref": (
+                            _ref(version.reference_set_ref) if version.reference_set_ref else None
+                        ),
+                        "content_digest": version.content_digest,
+                    }
+                    for version in sorted(
+                        (candidate for candidate in canonical.shots if candidate.entity_id == item.entity_id),
+                        key=lambda candidate: candidate.revision,
+                    )
+                ],
+                "trace": {"revision": item.revision, "content_digest": item.content_digest},
+            }
+            for item in latest_shots
+        ],
+        "reference_assets": [
+            {
+                "ref": _ref(item.as_ref()),
+                "asset_kind": item.asset_kind,
+                "label": item.label,
+                "identity": item.identity,
+                "confidence": item.confidence,
+                "approval_state": item.approval_state,
+                "human_confirmed": item.human_confirmed,
+                "provenance": [
+                    {
+                        "source_id": source.source_id,
+                        "source_type": source.source_type,
+                        "rights_basis": source.rights_basis,
+                    }
+                    for source in item.source_refs
+                ],
+                "trace": {"revision": item.revision, "content_digest": item.content_digest},
+            }
+            for item in latest_assets
+        ],
+        "reference_sets": [
+            {
+                "ref": _ref(item.as_ref()),
+                "title": item.title,
+                "summary": item.summary,
+                "scope_kind": item.scope_kind,
+                "scope_refs": [_ref(ref) for ref in item.scope_refs],
+                "asset_refs": [_ref(ref) for ref in item.asset_refs],
+                "approval_state": item.approval_state,
+                "human_confirmed": item.human_confirmed,
+                "trace": {"revision": item.revision, "content_digest": item.content_digest},
+            }
+            for item in latest_sets
+        ],
+        "counts": {
+            "episodes": len(latest_episodes),
+            "scenes": len(latest_scenes),
+            "shots": len(latest_shots),
+            "reference_assets": len(latest_assets),
+            "reference_sets": len(latest_sets),
+        },
+        "provider_dispatch_count": 0,
+    }
+    _require_safe_serialization(projection)
+    return projection
 
 
 _WINDOWS_ABSOLUTE_PATH_RE = re.compile(
@@ -276,7 +490,7 @@ def _current_episode_scenes(
     scenes = tuple(
         item
         for item in _latest_by_entity(aggregate.scenes)
-        if item.episode_ref == episode.as_ref()
+        if item.episode_ref.entity_id == episode.entity_id
     )
     _require_unique_sequences(scenes, "scene")
     return tuple(sorted(scenes, key=lambda item: (item.sequence, item.entity_id, item.version_id)))
@@ -286,11 +500,11 @@ def _current_episode_shots(
     aggregate: ProductionProjectAggregate,
     scenes: tuple[SceneVersion, ...],
 ) -> tuple[ShotVersion, ...]:
-    scene_refs = {item.as_ref() for item in scenes}
+    scene_entity_ids = {item.entity_id for item in scenes}
     shots = tuple(
         item
         for item in _latest_by_entity(aggregate.shots)
-        if item.scene_ref in scene_refs
+        if item.scene_ref.entity_id in scene_entity_ids
     )
     _require_unique_sequences(shots, "shot")
     return tuple(sorted(shots, key=lambda item: (item.sequence, item.entity_id, item.version_id)))
@@ -763,9 +977,11 @@ def _decoded_string(value: str) -> str:
 
 
 __all__ = (
+    "CREATOR_AUTHORING_PROJECTION_SCHEMA_VERSION",
     "EPISODE_WORKSPACE_PROJECTION_SCHEMA_VERSION",
     "EpisodeWorkspaceProjectionError",
     "WorkspaceProjectionReferenceError",
     "WorkspaceProjectionStateError",
+    "build_creator_authoring_projection",
     "build_episode_workspace_projection",
 )

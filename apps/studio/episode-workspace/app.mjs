@@ -387,4 +387,10 @@ async function hydrate() {
   } catch (error) { renderError(error); }
 }
 
-hydrate();
+if (projectId && !episodeId && !episodeVersionId) {
+  import("./authoring-app.mjs?creator=v05")
+    .then(({ startCreatorAuthoring }) => startCreatorAuthoring(app, projectId))
+    .catch(() => renderState("error", "无法打开创作工作台", "请稍后重试。"));
+} else {
+  hydrate();
+}

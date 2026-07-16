@@ -24,6 +24,7 @@ from apps.api.runtime_store import RuntimeStore
 
 
 STUDIO_EPISODE_PROJECT_TYPE = "studio_episode_production"
+STUDIO_CREATOR_AUTHORING_PROJECT_TYPE = "studio_creator_authoring"
 BOOTSTRAP_EPISODE_ID = "episode-001"
 BOOTSTRAP_EPISODE_VERSION_ID = "episode-001-v1"
 BOOTSTRAP_SCENE_ID = "scene-001"
@@ -49,8 +50,76 @@ class EpisodeBootstrapResult:
         }
 
 
+@dataclass(frozen=True)
+class CreatorAuthoringBootstrapResult:
+    aggregate: ProductionProjectAggregate
+    created: bool
+    replayed: bool
+
+    @property
+    def workspace_entry(self) -> dict[str, str]:
+        return {
+            "href": (
+                f"/studio/episode-workspace/?project={self.aggregate.scope.project_id}"
+            ),
+        }
+
+
 def should_bootstrap_episode_project(project_type: str) -> bool:
     return str(project_type or "").strip() == STUDIO_EPISODE_PROJECT_TYPE
+
+
+def should_bootstrap_creator_authoring_project(project_type: str) -> bool:
+    return str(project_type or "").strip() == STUDIO_CREATOR_AUTHORING_PROJECT_TYPE
+
+
+def ensure_empty_creator_bootstrap(
+    store: RuntimeStore,
+    *,
+    scope: TenantScope,
+    title: str,
+    idempotency_key: str = "project-create-creator-bootstrap-v1",
+) -> CreatorAuthoringBootstrapResult:
+    aggregate_store = EpisodeDomainAggregateStore(store.root)
+    try:
+        aggregate = aggregate_store.load(org_id=scope.org_id, project_id=scope.project_id)
+    except AggregateNotFoundError:
+        aggregate = build_empty_creator_aggregate(scope=scope, title=title)
+        result = _save_bootstrap(aggregate_store, aggregate, idempotency_key=idempotency_key)
+        return CreatorAuthoringBootstrapResult(
+            aggregate=result.aggregate,
+            created=not result.replayed,
+            replayed=result.replayed,
+        )
+    return CreatorAuthoringBootstrapResult(aggregate=aggregate, created=False, replayed=True)
+
+
+def build_empty_creator_aggregate(
+    *,
+    scope: TenantScope,
+    title: str,
+) -> ProductionProjectAggregate:
+    safe_title = _safe_title(title)
+    project = ProjectVersion(
+        **_fact(scope, "project", scope.project_id),
+        title=safe_title,
+        summary="",
+        creative_intent="",
+        ip_profile="",
+        data_policy=ProjectDataPolicy(
+            visibility="private",
+            training_use="denied_by_default",
+            product_improvement_use="denied_by_default",
+            export_enabled=True,
+            deletion_enabled=True,
+        ),
+    )
+    return ProductionProjectAggregate(
+        aggregate_version=1,
+        evaluated_at=BOOTSTRAP_CREATED_AT,
+        scope=scope,
+        projects=(project,),
+    )
 
 
 def ensure_minimal_episode_bootstrap(
@@ -192,9 +261,14 @@ def _digest(value: object) -> str:
 __all__ = (
     "BOOTSTRAP_EPISODE_ID",
     "BOOTSTRAP_EPISODE_VERSION_ID",
+    "STUDIO_CREATOR_AUTHORING_PROJECT_TYPE",
     "STUDIO_EPISODE_PROJECT_TYPE",
+    "CreatorAuthoringBootstrapResult",
     "EpisodeBootstrapResult",
+    "build_empty_creator_aggregate",
     "build_minimal_episode_aggregate",
+    "ensure_empty_creator_bootstrap",
     "ensure_minimal_episode_bootstrap",
+    "should_bootstrap_creator_authoring_project",
     "should_bootstrap_episode_project",
 )

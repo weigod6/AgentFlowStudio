@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from apps.api.runtime_studio_state_assets import sanitize_assets
+from apps.api.runtime_studio_state_creator_authoring import sanitize_creator_authoring
 from apps.api.runtime_studio_state_episode_workspace import sanitize_episode_workspace
 from apps.api.runtime_studio_state_params import SAFE_NODE_PARAM_KEYS, sanitize_node_params
 from apps.api.runtime_studio_state_preview import LOCAL_PATH_PATTERN, safe_node_preview_url, safe_preview_url
@@ -62,6 +63,11 @@ def sanitize_studio_state(value: dict[str, Any], *, project_id: str | None = Non
             value.get("episode_workspace"),
             text=_text,
             number=_number,
+            reject_forbidden=_reject_forbidden,
+        ),
+        "creator_authoring": sanitize_creator_authoring(
+            value.get("creator_authoring"),
+            text=_text,
             reject_forbidden=_reject_forbidden,
         ),
         "production": _production(value.get("production")),

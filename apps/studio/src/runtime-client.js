@@ -651,6 +651,27 @@ export function createRuntimeClient(projectId = "studio-local-001") {
       const version = encodeURIComponent(episodeVersionId);
       return requestJson(`/projects/${encoded}/episodes/${episode}/versions/${version}/workspace`);
     },
+    loadCreatorWorkspace() {
+      return requestJson(`/projects/${encoded}/creator-workspace`);
+    },
+    previewShotImpact(payload) {
+      return requestJson(`/projects/${encoded}/episode-production-aggregate/shot-impact-preview`, {
+        method: "POST",
+        payload,
+      });
+    },
+    previewShotRestore(payload) {
+      return requestJson(`/projects/${encoded}/episode-production-aggregate/shot-restore-preview`, {
+        method: "POST",
+        payload,
+      });
+    },
+    diffShotVersions(payload) {
+      return requestJson(`/projects/${encoded}/episode-production-aggregate/shot-version-diff`, {
+        method: "POST",
+        payload,
+      });
+    },
     executeEpisodeCommand(payload, idempotencyKey) {
       return requestJson(`/projects/${encoded}/episode-production-aggregate/commands`, {
         method: "POST",

@@ -14,6 +14,17 @@ from apps.api.runtime_episode_continuity_service import (
     plan_change,
     undo_change,
 )
+from apps.api.runtime_episode_authoring_service import (
+    AuthoringReferenceError,
+    AuthoringScopeError,
+    AuthoringStateError,
+    AuthoringVersionConflictError,
+    create_authoring_entity,
+    reorder_authoring_entities,
+    restore_shot_as_new,
+    revise_authoring_entity,
+    revise_shot_intent,
+)
 from apps.api.runtime_episode_creator_workflow_service import (
     CreatorWorkflowReferenceError,
     CreatorWorkflowScopeError,
@@ -28,6 +39,7 @@ from apps.api.runtime_episode_domain_contract import (
     EntityVersionRef,
     ProductionProjectAggregate,
     SafeArtifactRef,
+    SourceEvidenceRef,
     TenantScope,
 )
 from apps.api.runtime_episode_domain_routes import (
@@ -67,6 +79,238 @@ class EpisodeCommandModel(BaseModel):
 
 class EpisodeCommandBase(EpisodeCommandModel):
     expected_aggregate_version: int = Field(ge=1, strict=True)
+
+
+class SeriesCreatePayload(EpisodeCommandModel):
+    entity_type: Literal["series"]
+    project_ref: EntityVersionRef
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=4000)
+    creative_intent: str = Field(default="", max_length=4000)
+
+
+class StoryBibleCreatePayload(EpisodeCommandModel):
+    entity_type: Literal["story_bible"]
+    project_ref: EntityVersionRef
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=8000)
+    world_rules: tuple[str, ...] = Field(default_factory=tuple, max_length=256)
+
+
+class ArcCreatePayload(EpisodeCommandModel):
+    entity_type: Literal["arc"]
+    series_ref: EntityVersionRef
+    story_bible_ref: EntityVersionRef | None = None
+    sequence: int = Field(ge=1, strict=True)
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=4000)
+    creative_intent: str = Field(default="", max_length=4000)
+
+
+class EpisodeCreatePayload(EpisodeCommandModel):
+    entity_type: Literal["episode"]
+    series_ref: EntityVersionRef
+    arc_ref: EntityVersionRef | None = None
+    sequence: int = Field(ge=1, strict=True)
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=4000)
+    creative_intent: str = Field(default="", max_length=4000)
+    reference_set_ref: EntityVersionRef | None = None
+
+
+class SceneCreatePayload(EpisodeCommandModel):
+    entity_type: Literal["scene"]
+    episode_ref: EntityVersionRef
+    sequence: int = Field(ge=1, strict=True)
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=4000)
+    creative_intent: str = Field(default="", max_length=4000)
+    reference_set_ref: EntityVersionRef | None = None
+
+
+class ShotCreatePayload(EpisodeCommandModel):
+    entity_type: Literal["shot"]
+    scene_ref: EntityVersionRef
+    sequence: int = Field(ge=1, strict=True)
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=4000)
+    creative_intent: str = Field(default="", max_length=4000)
+    duration_seconds: float = Field(gt=0, le=3600)
+    reference_set_ref: EntityVersionRef | None = None
+
+
+class ReferenceAssetCreatePayload(EpisodeCommandModel):
+    entity_type: Literal["reference_asset"]
+    project_ref: EntityVersionRef
+    asset_kind: Literal["human", "animal", "scene", "location", "prop", "style", "voice"]
+    label: str = Field(min_length=1, max_length=200)
+    identity: str = Field(min_length=1, max_length=1000)
+    confidence: float = Field(ge=0, le=1)
+    approval_state: Literal["pending_human", "approved", "rejected"] = "pending_human"
+    human_confirmed: bool = False
+    source_refs: tuple[SourceEvidenceRef, ...] = Field(default_factory=tuple, max_length=64)
+
+
+class ReferenceSetCreatePayload(EpisodeCommandModel):
+    entity_type: Literal["reference_set"]
+    project_ref: EntityVersionRef
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=4000)
+    scope_kind: Literal["project", "series", "arc", "episode", "scene", "shot"] = "project"
+    scope_refs: tuple[EntityVersionRef, ...] = Field(default_factory=tuple, max_length=256)
+    asset_refs: tuple[EntityVersionRef, ...] = Field(default_factory=tuple, max_length=256)
+    approval_state: Literal["pending_human", "approved", "rejected"] = "pending_human"
+    human_confirmed: bool = False
+
+
+AuthoringCreatePayload = Annotated[
+    Union[
+        SeriesCreatePayload,
+        StoryBibleCreatePayload,
+        ArcCreatePayload,
+        EpisodeCreatePayload,
+        SceneCreatePayload,
+        ShotCreatePayload,
+        ReferenceAssetCreatePayload,
+        ReferenceSetCreatePayload,
+    ],
+    Field(discriminator="entity_type"),
+]
+
+
+class AuthoringCreateCommand(EpisodeCommandBase):
+    action: Literal["authoring.create"]
+    entity_id: str = Field(pattern=SAFE_ID)
+    version_id: str = Field(pattern=SAFE_ID)
+    created_at: str = Field(min_length=1, max_length=64)
+    entity: AuthoringCreatePayload
+
+
+class ProjectEditPayload(EpisodeCommandModel):
+    entity_type: Literal["project"]
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    summary: str | None = Field(default=None, max_length=4000)
+    creative_intent: str | None = Field(default=None, max_length=4000)
+    ip_profile: str | None = Field(default=None, max_length=4000)
+
+
+class SeriesEditPayload(EpisodeCommandModel):
+    entity_type: Literal["series"]
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    summary: str | None = Field(default=None, max_length=4000)
+    creative_intent: str | None = Field(default=None, max_length=4000)
+
+
+class StoryBibleEditPayload(EpisodeCommandModel):
+    entity_type: Literal["story_bible"]
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    summary: str | None = Field(default=None, max_length=8000)
+    world_rules: tuple[str, ...] | None = Field(default=None, max_length=256)
+
+
+class ArcEditPayload(EpisodeCommandModel):
+    entity_type: Literal["arc"]
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    summary: str | None = Field(default=None, max_length=4000)
+    creative_intent: str | None = Field(default=None, max_length=4000)
+
+
+class EpisodeEditPayload(EpisodeCommandModel):
+    entity_type: Literal["episode"]
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    summary: str | None = Field(default=None, max_length=4000)
+    creative_intent: str | None = Field(default=None, max_length=4000)
+    reference_set_ref: EntityVersionRef | None = None
+
+
+class SceneEditPayload(EpisodeCommandModel):
+    entity_type: Literal["scene"]
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    summary: str | None = Field(default=None, max_length=4000)
+    creative_intent: str | None = Field(default=None, max_length=4000)
+    reference_set_ref: EntityVersionRef | None = None
+
+
+class ReferenceAssetEditPayload(EpisodeCommandModel):
+    entity_type: Literal["reference_asset"]
+    label: str | None = Field(default=None, min_length=1, max_length=200)
+    identity: str | None = Field(default=None, min_length=1, max_length=1000)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    approval_state: Literal["pending_human", "approved", "rejected"] | None = None
+    human_confirmed: bool | None = None
+
+
+class ReferenceSetEditPayload(EpisodeCommandModel):
+    entity_type: Literal["reference_set"]
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    summary: str | None = Field(default=None, max_length=4000)
+    scope_kind: Literal["project", "series", "arc", "episode", "scene", "shot"] | None = None
+    scope_refs: tuple[EntityVersionRef, ...] | None = Field(default=None, max_length=256)
+    asset_refs: tuple[EntityVersionRef, ...] | None = Field(default=None, max_length=256)
+    approval_state: Literal["pending_human", "approved", "rejected"] | None = None
+    human_confirmed: bool | None = None
+
+
+AuthoringEditPayload = Annotated[
+    Union[
+        ProjectEditPayload,
+        SeriesEditPayload,
+        StoryBibleEditPayload,
+        ArcEditPayload,
+        EpisodeEditPayload,
+        SceneEditPayload,
+        ReferenceAssetEditPayload,
+        ReferenceSetEditPayload,
+    ],
+    Field(discriminator="entity_type"),
+]
+
+
+class AuthoringReviseCommand(EpisodeCommandBase):
+    action: Literal["authoring.revise"]
+    target_ref: EntityVersionRef
+    new_version_id: str = Field(pattern=SAFE_ID)
+    created_at: str = Field(min_length=1, max_length=64)
+    changes: AuthoringEditPayload
+
+
+class AuthoringReorderCommand(EpisodeCommandBase):
+    action: Literal["authoring.reorder"]
+    ordered_refs: tuple[EntityVersionRef, ...] = Field(min_length=1, max_length=4096)
+    new_version_ids: tuple[str, ...] = Field(min_length=1, max_length=4096)
+    created_at: str = Field(min_length=1, max_length=64)
+
+
+class ShotCreativePatch(EpisodeCommandModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    summary: str | None = Field(default=None, max_length=4000)
+    creative_intent: str | None = Field(default=None, max_length=4000)
+    duration_seconds: float | None = Field(default=None, gt=0, le=3600)
+    reference_set_ref: EntityVersionRef | None = None
+
+
+class ShotReviseIntentCommand(EpisodeCommandBase):
+    action: Literal["shot.revise_intent"]
+    shot_ref: EntityVersionRef
+    new_version_id: str = Field(pattern=SAFE_ID)
+    created_at: str = Field(min_length=1, max_length=64)
+    changes: ShotCreativePatch
+    preview_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    confirmed_direct_refs: tuple[EntityVersionRef, ...] = Field(max_length=128)
+    confirmed_transitive_refs: tuple[EntityVersionRef, ...] = Field(max_length=4096)
+    confirmed_protected_refs: tuple[EntityVersionRef, ...] = Field(max_length=65536)
+
+
+class ShotRestoreCommand(EpisodeCommandBase):
+    action: Literal["shot.restore"]
+    historical_ref: EntityVersionRef
+    current_ref: EntityVersionRef
+    new_version_id: str = Field(pattern=SAFE_ID)
+    created_at: str = Field(min_length=1, max_length=64)
+    preview_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    confirmed_direct_refs: tuple[EntityVersionRef, ...] = Field(max_length=128)
+    confirmed_transitive_refs: tuple[EntityVersionRef, ...] = Field(max_length=4096)
+    confirmed_protected_refs: tuple[EntityVersionRef, ...] = Field(max_length=65536)
 
 
 class ShotReassignSceneCommand(EpisodeCommandBase):
@@ -200,6 +444,11 @@ class DeliveryUnlockCommand(EpisodeCommandBase):
 
 EpisodeCommandRequest = Annotated[
     Union[
+        AuthoringCreateCommand,
+        AuthoringReviseCommand,
+        AuthoringReorderCommand,
+        ShotReviseIntentCommand,
+        ShotRestoreCommand,
         ShotReassignSceneCommand,
         ShotReviewCommand,
         ContinuityApplyCommand,
@@ -293,11 +542,26 @@ def register_runtime_episode_command_routes(
             _raise_store_error(exc, request=request, project_id=project_id)
         except CreatorWorkflowScopeError as exc:
             _raise_service_error(request, project_id, exc, category="scope")
-        except (CreatorWorkflowVersionConflictError, ReviewDeliveryVersionConflictError) as exc:
+        except AuthoringScopeError as exc:
+            _raise_service_error(request, project_id, exc, category="scope")
+        except (
+            AuthoringVersionConflictError,
+            CreatorWorkflowVersionConflictError,
+            ReviewDeliveryVersionConflictError,
+        ) as exc:
             _raise_service_error(request, project_id, exc, category="version")
-        except (CreatorWorkflowReferenceError, ReviewDeliveryReferenceError) as exc:
+        except (
+            AuthoringReferenceError,
+            CreatorWorkflowReferenceError,
+            ReviewDeliveryReferenceError,
+        ) as exc:
             _raise_service_error(request, project_id, exc, category="reference")
-        except (CreatorWorkflowStateError, ReviewDeliveryStateError, ContinuityServiceError) as exc:
+        except (
+            AuthoringStateError,
+            CreatorWorkflowStateError,
+            ReviewDeliveryStateError,
+            ContinuityServiceError,
+        ) as exc:
             _raise_service_error(request, project_id, exc, category="state")
         except ReviewDeliveryScopeError as exc:
             _raise_service_error(request, project_id, exc, category="scope")
@@ -339,6 +603,68 @@ def _execute_command(
         "scope": scope,
         "expected_aggregate_version": command.expected_aggregate_version,
     }
+    if isinstance(command, AuthoringCreateCommand):
+        attributes = _typed_model_values(command.entity, exclude={"entity_type"})
+        return create_authoring_entity(
+            aggregate,
+            **common,
+            entity_type=command.entity.entity_type,
+            entity_id=command.entity_id,
+            version_id=command.version_id,
+            created_at=command.created_at,
+            attributes=attributes,
+        )
+    if isinstance(command, AuthoringReviseCommand):
+        if command.target_ref.entity_type != command.changes.entity_type:
+            raise AuthoringReferenceError("revision target and typed changes disagree")
+        changes = _typed_model_values(
+            command.changes,
+            exclude={"entity_type"},
+            only_set=True,
+        )
+        return revise_authoring_entity(
+            aggregate,
+            **common,
+            target_ref=command.target_ref,
+            new_version_id=command.new_version_id,
+            created_at=command.created_at,
+            changes=changes,
+        )
+    if isinstance(command, AuthoringReorderCommand):
+        return reorder_authoring_entities(
+            aggregate,
+            **common,
+            ordered_refs=command.ordered_refs,
+            new_version_ids=command.new_version_ids,
+            created_at=command.created_at,
+        )
+    if isinstance(command, ShotReviseIntentCommand):
+        changes = _typed_model_values(command.changes, only_set=True)
+        return revise_shot_intent(
+            aggregate,
+            **common,
+            shot_ref=command.shot_ref,
+            new_version_id=command.new_version_id,
+            created_at=command.created_at,
+            proposed_changes=changes,
+            preview_digest=command.preview_digest,
+            confirmed_direct_refs=command.confirmed_direct_refs,
+            confirmed_transitive_refs=command.confirmed_transitive_refs,
+            confirmed_protected_refs=command.confirmed_protected_refs,
+        )
+    if isinstance(command, ShotRestoreCommand):
+        return restore_shot_as_new(
+            aggregate,
+            **common,
+            historical_ref=command.historical_ref,
+            current_ref=command.current_ref,
+            new_version_id=command.new_version_id,
+            created_at=command.created_at,
+            preview_digest=command.preview_digest,
+            confirmed_direct_refs=command.confirmed_direct_refs,
+            confirmed_transitive_refs=command.confirmed_transitive_refs,
+            confirmed_protected_refs=command.confirmed_protected_refs,
+        )
     if isinstance(command, ShotReassignSceneCommand):
         return reassign_shot_scene(
             aggregate,
@@ -505,6 +831,27 @@ def _contract_artifact(ref: EpisodeSafeArtifactRef) -> SafeArtifactRef:
     return SafeArtifactRef.model_validate(ref.model_dump(mode="json"))
 
 
+def _typed_model_values(
+    model: BaseModel,
+    *,
+    exclude: set[str] | None = None,
+    only_set: bool = False,
+) -> dict[str, Any]:
+    excluded = exclude or set()
+    field_names = type(model).model_fields
+    if only_set:
+        field_names = {
+            name: field
+            for name, field in field_names.items()
+            if name in model.model_fields_set
+        }
+    return {
+        name: getattr(model, name)
+        for name in field_names
+        if name not in excluded
+    }
+
+
 def _command_digest(scope: TenantScope, command: EpisodeCommandRequest) -> str:
     canonical = json.dumps(
         {
@@ -588,5 +935,6 @@ def _raise_command_error(
 __all__ = (
     "EpisodeCommandRequest",
     "EpisodeCommandResponse",
+    "ShotCreativePatch",
     "register_runtime_episode_command_routes",
 )
