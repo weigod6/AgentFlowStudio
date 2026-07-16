@@ -92,6 +92,8 @@ const PROP_REFERENCE_TERMS = [
   "牵引绳",
   "狗绳",
   "毛线团",
+  "项圈",
+  "断绳",
   "断戟",
   "青铜虎符",
   "虎符",
@@ -104,6 +106,10 @@ const PROP_REFERENCE_TERMS = [
   "草稿纸",
   "寻狗启事",
   "启事",
+  "手机",
+  "照片",
+  "信件",
+  "信封",
   "金箍棒",
   "钢爪",
   "地图",
@@ -144,6 +150,8 @@ const GENERIC_PROP_NOUN_TERMS = [
   "毛线团",
   "纸盒",
   "纸箱",
+  "项圈",
+  "断绳",
   "香炉",
   "面包",
   "耳机线",
@@ -160,6 +168,8 @@ const KEY_PROP_ACTION_TERMS = [
   "叼",
   "吐",
   "顶",
+  "勾",
+  "勾着",
   "拾起",
   "翻转",
   "展开",
@@ -175,9 +185,57 @@ const KEY_PROP_ACTION_TERMS = [
   "批注",
   "锁定",
   "递",
+  "掏出",
   "撑着",
   "放在",
   "压住",
+];
+const ACTION_FRAGMENT_LABEL_TERMS = [
+  "挣脱",
+  "转身",
+  "轻巧",
+  "跃下",
+  "落地",
+  "掏出",
+  "本能",
+  "悬停",
+  "低头",
+  "抬头",
+  "回头",
+  "侧身",
+  "伸手",
+  "抬手",
+  "咬牙",
+];
+const BODY_PART_LABEL_TERMS = [
+  "右眼",
+  "左眼",
+  "瞳孔",
+  "眼睛",
+  "指尖",
+  "手指",
+  "指节",
+  "爪子",
+  "耳朵",
+  "鼻尖",
+  "鼻头",
+  "喉结",
+  "下颌",
+  "肩",
+  "手腕",
+  "后颈",
+];
+const NON_CHARACTER_LABEL_TERMS = [
+  "手机",
+  "屏幕",
+  "试卷",
+  "草稿",
+  "启事",
+  "断戟",
+  "虎符",
+  "竹简",
+  "军旗",
+  "残旗",
 ];
 
 export function normalizeAssetExtractionRefs(assetRefs, options = {}) {
@@ -220,12 +278,19 @@ export function normalizeAssetRefForContract(asset, index = 0, context = "") {
   let provisionalName = Boolean(asset?.provisional_name);
   let nameSource = String(asset?.name_source || asset?.source || "candidate");
 
-  if (assetType === "character" && looksLikePropReference(rawLabel, evidence, contextText)) assetType = "prop";
+  if (assetType === "character" && looksLikePropReference(rawLabel, evidence, contextText)) {
+    assetType = "prop";
+    displayName = cleanPropLabel(rawLabel) || rawLabel;
+  }
+  else if (assetType === "prop" && looksLikePropPhraseLabel(displayName)) displayName = cleanPropLabel(displayName) || displayName;
   if (assetType === "scene" && isAudioOnlyCityReference(rawLabel, evidence, contextText)) {
     return { ref: null, diagnostic: diagnostic(rawLabel, assetType, "audio_only_non_visual_city_reference", evidence || contextText) };
   }
   if (assetType === "character" && PRONOUN_LABELS.has(rawLabel)) {
     return { ref: null, diagnostic: diagnostic(rawLabel, assetType, "ambiguous_alias_not_auto_merged", evidence || contextText) };
+  }
+  if (assetType === "character" && looksLikeActionFragmentLabel(rawLabel)) {
+    return { ref: null, diagnostic: diagnostic(rawLabel, assetType, "action_fragment_not_asset", evidence || contextText) };
   }
   if (assetType === "character" && GENERIC_CHARACTER_LABELS.has(rawLabel)) {
     const provisional = provisionalCharacterName(contextText);
@@ -357,7 +422,41 @@ function looksLikeCharacterName(value) {
   const clean = String(value || "").trim();
   if (!clean || GENERIC_CHARACTER_LABELS.has(clean) || GENERIC_SCENE_LABELS.has(clean) || PRONOUN_LABELS.has(clean)) return false;
   if (["暴雨", "泥浆", "古战场", "战场", "城墙", "城垛", "雷声", "雨声", "镜头", "画面", "远处", "血色", "残旗", "军旗", "断戟", "虎符", "竹简", "试卷", "草稿", "启事"].some((term) => clean.includes(term))) return false;
+  if (looksLikeActionFragmentLabel(clean)) return false;
   return /^[\u4e00-\u9fff]{2,4}$/.test(clean);
+}
+
+function looksLikeActionFragmentLabel(value) {
+  const clean = String(value || "").trim();
+  if (!clean) return false;
+  if (/^(?:他|她|它|这|那|其|我|你)/.test(clean)) return true;
+  if (ACTION_FRAGMENT_LABEL_TERMS.some((term) => clean.includes(term))) return true;
+  if (BODY_PART_LABEL_TERMS.some((term) => clean.includes(term))) return true;
+  if (NON_CHARACTER_LABEL_TERMS.some((term) => clean.includes(term))) return true;
+  return false;
+}
+
+function looksLikePropPhraseLabel(value) {
+  const clean = String(value || "").trim();
+  if (!clean) return false;
+  if (/^(?:他|她|它|这|那|其|我|你)/.test(clean)) return true;
+  return [
+    "掏出",
+    "叼着",
+    "吐出",
+    "吐在",
+    "捧着",
+    "拿着",
+    "握着",
+    "攥着",
+    "撑着",
+    "拾起",
+    "翻转",
+    "露出",
+    "放在",
+    "压住",
+    "勾着",
+  ].some((term) => clean.includes(term));
 }
 
 function namedAnimalCharacters(text) {
@@ -446,7 +545,7 @@ function visualPropNames(text) {
     if (source.includes(term)) names.push(cleanPropLabel(term));
   }
   names.push(...genericVisualPropNames(source));
-  const objectRe = /(?:半截|半枚|一卷|一张|一只|一柄|一根|那柄|那张|那只|那截)?([\u4e00-\u9fffA-Za-z0-9·]{0,8}(?:断戟|青铜虎符|虎符|竹简|军旗|残旗|军籍册|试卷|草稿纸|寻狗启事|启事|网球|红绳|牵引绳|狗绳|毛线团|金箍棒|钢爪|地图|钥匙))/gu;
+  const objectRe = /(?:半截|半枚|一卷|一张|一只|一柄|一根|那柄|那张|那只|那截)?([\u4e00-\u9fffA-Za-z0-9·]{0,8}(?:断戟|青铜虎符|虎符|竹简|军旗|残旗|军籍册|试卷|草稿纸|寻狗启事|启事|网球|红绳|牵引绳|狗绳|毛线团|项圈|断绳|手机|照片|信件|信封|金箍棒|钢爪|地图|钥匙))/gu;
   for (const match of source.matchAll(objectRe)) names.push(cleanPropLabel(match[1]));
   return dedupeNonOverlapping(names.filter(Boolean)).slice(0, 4);
 }
@@ -484,7 +583,7 @@ function isAnimalAliasName(label, text) {
 
 function cleanPropLabel(value) {
   const clean = String(value || "")
-    .replace(/^(?:叼着|吐出|吐在|捧着|拿着|握着|攥着|撑着|拾起|翻转|露出|放在|顶了顶|压住|反射|写着|批注|捏着|磨损严重的|没吃完的|湿漉漉的|湿透的|湿透|褪色的|褪色|发光的|发光|半截|半枚|一卷|一张|一只|一柄|一根|一块|一团|一盒|一箱|那柄|那张|那只|那截|那根|这根|这张|这只)+/, "")
+    .replace(/^(?:他|她|它|这|那|其)?(?:叼着|吐出|吐在|捧着|拿着|握着|攥着|撑着|拾起|翻转|露出|放在|顶了顶|压住|反射|写着|批注|捏着|掏出|勾着|磨损严重的|没吃完的|湿漉漉的|湿透的|湿透|褪色的|褪色|发光的|发光|半截|半枚|一卷|一张|一只|一柄|一根|一块|一团|一盒|一箱|那柄|那张|那只|那截|那根|这根|这张|这只)+/, "")
     .trim();
   const term = [...PROP_REFERENCE_TERMS].sort((a, b) => b.length - a.length).find((item) => item && clean.includes(item));
   if (term) return term.slice(0, 24);

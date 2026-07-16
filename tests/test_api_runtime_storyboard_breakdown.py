@@ -229,6 +229,41 @@ def test_storyboard_local_fallback_resolves_animal_and_prop_coreference_generica
     assert "荧光绿网球" in {ref["label"] for ref in shots[2]["asset_refs"] if ref["asset_type"] == "prop"}
 
 
+def test_storyboard_local_fallback_rejects_action_fragments_and_future_asset_leaks() -> None:
+    script = (
+        "片名：《捡到一只狗》 小明蹲在老城区巷口的青石台阶上，指尖沾着猫毛，"
+        "正给怀里的橘猫顺毛。夕阳斜切过砖墙，把暖金色泼在青苔斑驳的石缝间，"
+        "也镀亮猫尾尖——它懒洋洋扫过他洗得发白的牛仔裤边沿。\n"
+        "这是他每天放学后最安静的十分钟：呼吸放慢，肩膀松弛，连睫毛垂落的弧度"
+        "都带着一种被时间允许的倦意。突然，橘猫脊背一绷，耳朵旋成两个尖锐的三角，"
+        "喉咙里滚出低沉而警惕的呼噜声。\n"
+        "它挣脱怀抱，四爪无声落地，转身轻巧跃下三级台阶，叼回一只浑身湿漉漉、"
+        "耳朵耷拉、项圈锈迹斑斑的土狗幼崽。小狗四肢僵直，爪子还死死勾着半截断绳，"
+        "像刚从暴雨里捞出来的旧玩具，抖得几乎听不见心跳。\n"
+        "小明愣住，瞳孔微缩，右手本能前伸——指尖悬停在离小狗鼻尖三寸处。"
+        "他掏出手机，屏幕亮起却迟迟没有按下拍摄键。"
+    )
+
+    shots = local_storyboard_shots(script, shot_count_hint=4)
+    labels_by_shot = [
+        {(ref["label"], ref["asset_type"]) for ref in shot["asset_refs"]}
+        for shot in shots
+    ]
+    all_labels = {label for labels in labels_by_shot for label, _asset_type in labels}
+
+    assert len(shots) == 4
+    assert {"它挣脱怀", "转身轻巧", "右眼", "他掏出手机"}.isdisjoint(all_labels)
+    assert ("小明", "character") in labels_by_shot[0]
+    assert ("橘猫", "character") in labels_by_shot[0]
+    assert ("老城区巷口", "scene") in labels_by_shot[0]
+    assert ("小狗", "character") in labels_by_shot[2]
+    assert ("橘猫", "character") in labels_by_shot[2]
+    assert ("项圈", "prop") in labels_by_shot[2]
+    assert ("断绳", "prop") in labels_by_shot[2]
+    assert all(("手机", "prop") not in labels for labels in labels_by_shot[:3])
+    assert ("手机", "prop") in labels_by_shot[3]
+
+
 def test_storyboard_breakdown_returns_asset_graph_with_cross_shot_evidence(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("AFS_ALLOW_REMOTE_LLM", raising=False)
     client = TestClient(create_runtime_app(runtime_root=tmp_path))

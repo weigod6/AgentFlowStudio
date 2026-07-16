@@ -55,6 +55,8 @@ PROP_REFERENCE_TERMS = (
     "牵引绳",
     "狗绳",
     "毛线团",
+    "项圈",
+    "断绳",
     "断戟",
     "青铜虎符",
     "虎符",
@@ -117,6 +119,8 @@ GENERIC_PROP_NOUN_TERMS = (
     "毛线团",
     "纸盒",
     "纸箱",
+    "项圈",
+    "断绳",
     "香炉",
     "面包",
     "耳机线",
@@ -133,6 +137,8 @@ KEY_PROP_ACTION_TERMS = (
     "叼",
     "吐",
     "顶",
+    "勾",
+    "勾着",
     "拾起",
     "翻转",
     "展开",
@@ -254,6 +260,53 @@ VISUAL_CHARACTER_TERMS = (
     "孙悟空",
     "猪八戒",
 )
+ACTION_FRAGMENT_LABEL_TERMS = (
+    "挣脱",
+    "转身",
+    "轻巧",
+    "跃下",
+    "落地",
+    "掏出",
+    "本能",
+    "悬停",
+    "低头",
+    "抬头",
+    "回头",
+    "侧身",
+    "伸手",
+    "抬手",
+    "咬牙",
+)
+BODY_PART_LABEL_TERMS = (
+    "右眼",
+    "左眼",
+    "瞳孔",
+    "眼睛",
+    "指尖",
+    "手指",
+    "指节",
+    "爪子",
+    "耳朵",
+    "鼻尖",
+    "鼻头",
+    "喉结",
+    "下颌",
+    "肩",
+    "手腕",
+    "后颈",
+)
+NON_CHARACTER_LABEL_TERMS = (
+    "手机",
+    "屏幕",
+    "试卷",
+    "草稿",
+    "启事",
+    "断戟",
+    "虎符",
+    "竹简",
+    "军旗",
+    "残旗",
+)
 
 
 def normalize_asset_refs_with_diagnostics(
@@ -349,12 +402,18 @@ def normalize_asset_ref_for_contract(
 
     if asset_type == "character" and _looks_like_prop_reference(raw_label, evidence, context_text):
         asset_type = "prop"
+        display_name = _clean_prop_label(raw_label) or raw_label
+    elif asset_type == "prop" and _looks_like_prop_phrase_label(display_name):
+        display_name = _clean_prop_label(display_name) or display_name
 
     if asset_type == "scene" and _is_audio_only_city_reference(raw_label, evidence, context_text):
         return None, _diagnostic(raw_label, asset_type, "audio_only_non_visual_city_reference", evidence or context_text)
 
     if asset_type == "character" and raw_label in PRONOUN_LABELS:
         return None, _diagnostic(raw_label, asset_type, "ambiguous_alias_not_auto_merged", evidence or context_text)
+
+    if asset_type == "character" and _looks_like_action_fragment_label(raw_label):
+        return None, _diagnostic(raw_label, asset_type, "action_fragment_not_asset", evidence or context_text)
 
     if asset_type == "character" and raw_label in GENERIC_CHARACTER_LABELS:
         provisional = _provisional_character_name(context_text)
@@ -511,10 +570,62 @@ def _looks_like_character_name(value: str) -> bool:
             "试卷",
             "草稿",
             "启事",
+            "挣脱",
+            "转身",
+            "轻巧",
+            "怀抱",
+            "右眼",
+            "左眼",
+            "屏幕",
         ),
     ):
         return False
+    if _looks_like_action_fragment_label(clean):
+        return False
     return bool(re.fullmatch(r"[\u4e00-\u9fff]{2,4}", clean))
+
+
+def _looks_like_action_fragment_label(value: str) -> bool:
+    clean = str(value or "").strip()
+    if not clean:
+        return False
+    if re.search(r"^(?:他|她|它|这|那|其|我|你)", clean):
+        return True
+    if _contains_any(clean, ACTION_FRAGMENT_LABEL_TERMS):
+        return True
+    if _contains_any(clean, BODY_PART_LABEL_TERMS):
+        return True
+    if _contains_any(clean, NON_CHARACTER_LABEL_TERMS):
+        return True
+    return False
+
+
+def _looks_like_prop_phrase_label(value: str) -> bool:
+    clean = str(value or "").strip()
+    if not clean:
+        return False
+    if re.search(r"^(?:他|她|它|这|那|其|我|你)", clean):
+        return True
+    return _contains_any(
+        clean,
+        (
+            "掏出",
+            "叼着",
+            "吐出",
+            "吐在",
+            "捧着",
+            "拿着",
+            "握着",
+            "攥着",
+            "撑着",
+            "拾起",
+            "翻转",
+            "露出",
+            "放在",
+            "压住",
+            "勾着",
+        ),
+    )
 
 
 def _named_animal_characters(text: str) -> list[str]:

@@ -104,7 +104,7 @@ export async function splitTextNodeToStoryboardNodes(store, node, runtime = null
     const allowLocalAssetInference = breakdown.mode === "local_fallback";
     const structuredShot = refineStructuredShotAssets(
       normalizeStoryboardShot(shot, index + 1),
-      allowLocalAssetInference ? source : "",
+      "",
       { inferMissingAssets: allowLocalAssetInference },
     );
     const shotText = structuredShotText(structuredShot);
