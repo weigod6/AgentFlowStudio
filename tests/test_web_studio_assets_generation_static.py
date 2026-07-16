@@ -1150,6 +1150,78 @@ process.stdout.write(JSON.stringify({
     assert "首帧锁定" in payload["prompt"]
 
 
+def test_keyframe_to_video_prompt_softens_animal_care_scene_for_provider_safety() -> None:
+    script = r'''
+import { createVideoNodeFromKeyframe } from "./apps/studio/src/keyframe-video-continuation.js";
+
+const state = {
+  nodes: {
+    keyframe_pet: {
+      id: "keyframe_pet",
+      type: "image",
+      title: "关键帧 · 分镜 01",
+      x: 120,
+      y: 80,
+      w: 420,
+      h: 320,
+      prompt: [
+        "根据分镜生成关键帧：@小明 @煤球 @奶狗 @老城区巷口。",
+        "小明蹲在老城区巷口的青石台阶上，怀里橘猫“煤球”正用肉垫按他手腕——它刚叼回一只湿漉漉的奶狗。",
+        "狗耳朵还滴着水，爪子悬在半空蹬踹。镜头保持对峙张力，后续冲突张力增强。"
+      ].join("\n"),
+      status: "complete",
+      previewUrl: "/media/keyframe_pet.png",
+      params: {
+        nodeRole: "keyframe_generation",
+        lastKeyframeJobId: "kf_job_pet",
+        spec: { ratio: "16:9", duration: "5s", resolution: "720P" },
+        visualAssets: [
+          { label: "小明", asset_type: "character", status: "fixed", signature: "小明：人物，蹲在青石台阶上" },
+          { label: "煤球", asset_type: "character", status: "fixed", character_subtype: "animal", signature: "煤球：猫；橘色毛色；刚叼回奶狗；用肉垫按小明手腕" },
+          { label: "奶狗", asset_type: "character", status: "fixed", character_subtype: "animal", signature: "奶狗：狗；幼犬；湿漉漉；爪子悬在半空蹬踹" },
+          { label: "老城区巷口", asset_type: "scene", status: "fixed", signature: "老城区巷口：青石台阶、晾衣绳、自然阳光" },
+        ],
+        uploads: [{
+          asset_id: "img_keyframe_pet",
+          filename: "keyframe_pet.png",
+          preview_url: "/media/keyframe_pet.png",
+          role: "generated_keyframe_reference",
+        }],
+      },
+    },
+  },
+  edges: {},
+  order: ["keyframe_pet"],
+  selection: { nodeIds: ["keyframe_pet"], edgeId: null },
+  ui: {},
+};
+let seq = 0;
+const store = {
+  get: () => state,
+  nextId: (prefix) => `${prefix}_${++seq}`,
+  set: (fn) => fn(state),
+};
+
+const video = createVideoNodeFromKeyframe(store, state.nodes.keyframe_pet);
+process.stdout.write(JSON.stringify({ prompt: video?.prompt }));
+'''
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    prompt = json.loads(completed.stdout)["prompt"]
+
+    assert "温和连续性" in prompt
+    assert "安全、平静、被照顾" in prompt
+    assert "动物角色" in prompt
+    assert "毛发湿润" in prompt
+    for risky in ("对峙", "冲突", "蓄势", "蹬踹", "刚叼回", "爪子悬在半空", "服装", "危险"):
+        assert risky not in prompt
+
+
 def test_legacy_keyframe_title_can_auto_plan_video_node_assets() -> None:
     script = r'''
 import {

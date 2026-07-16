@@ -429,6 +429,29 @@ def test_video_provider_prompt_removes_image_edit_language() -> None:
     assert "周彤" in prompt
 
 
+def test_video_provider_prompt_softens_legacy_keyframe_video_prompt_for_animal_scene() -> None:
+    request = runtime_video_routes.VideoGenerationRequest(
+        prompt_text=(
+            "5s 图生视频时间轴：以上游关键帧作为 0.0s 首帧视觉锚点。\n"
+            "0.0-1.0s：保留对峙关系，只加入呼吸。\n"
+            "2.5-4.0s：冲突张力增强，构图仍稳定。\n"
+            "上游关键帧摘要：橘猫“煤球”刚叼回一只湿漉漉的奶狗，爪子悬在半空蹬踹。"
+        ),
+        provider_service_id="fake_video",
+        first_frame_image_asset_id="img_first_frame",
+        duration_sec=5,
+        motion="轻微推进，保留对峙张力和呼吸感镜头。",
+        generated_at="2026-07-16T10:00:00+08:00",
+    )
+
+    prompt = runtime_video_routes._video_provider_prompt(request, {})
+
+    assert "温和连续性" in prompt
+    assert "毛发湿润" in prompt
+    for risky in ("对峙", "冲突", "蓄势", "蹬踹", "刚叼回", "爪子悬在半空"):
+        assert risky not in prompt
+
+
 def test_video_generation_strips_adapter_output_dir_from_persisted_task_state(tmp_path, monkeypatch) -> None:
     config = _fake_video_provider_config(tmp_path)
     monkeypatch.setenv("AFS_PROVIDER_CONFIG", str(config))

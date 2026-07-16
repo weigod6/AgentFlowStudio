@@ -36,6 +36,48 @@ def strip_image_edit_language(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def strip_keyframe_video_safety_language(value: str) -> str:
+    text = strip_image_edit_language(value)
+    for before, after in (
+        ("保留对峙关系", "保持首帧空间关系"),
+        ("对峙张力", "温和连续性"),
+        ("对峙", "同框互动"),
+        ("冲突张力增强", "情绪自然推进"),
+        ("冲突张力", "情绪节奏"),
+        ("冲突", "互动"),
+        ("蓄势", "姿态微调"),
+    ):
+        text = text.replace(before, after)
+    if _legacy_keyframe_video_prompt_text(text) and _care_sensitive_video_text(text):
+        for before, after in (
+            ("刚叼回一只", "正在照看一只"),
+            ("叼回", "带回"),
+            ("叼着", "靠近"),
+            ("蹬踹", "轻微小幅动作"),
+            ("爪子悬在半空", "爪子保持自然小幅动作"),
+            ("挣扎", "轻微动作"),
+            ("湿漉漉", "毛发湿润"),
+            ("滴着水", "带有水珠"),
+            ("炸毛", "毛发状态"),
+            ("死命一塞", "轻轻靠近"),
+            ("塞进", "靠近"),
+            ("缺耳", "耳部特征"),
+            ("缺了一小块", "耳部特征"),
+            ("伤疤", "可见细节"),
+            ("旧伤疤", "可见细节"),
+            ("伤口", "可见细节"),
+            ("流血", "可见细节"),
+            ("锁链", "可见细节"),
+            ("金属撞击", "可见细节"),
+            ("攻击", "高强度动作"),
+            ("威胁", "高强度动作"),
+            ("追逐", "高强度动作"),
+            ("打斗", "高强度动作"),
+        ):
+            text = text.replace(before, after)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def video_provider_prompt(
     *,
     prompt_text: str,
@@ -47,7 +89,7 @@ def video_provider_prompt(
     context_subgraph: Any | None = None,
     limit: int = 4000,
 ) -> str:
-    base = strip_image_edit_language(optimized_prompt or prompt_text)
+    base = strip_keyframe_video_safety_language(optimized_prompt or prompt_text)
     plan = video_generation_plan(
         prompt_text=prompt_text,
         optimized_prompt=optimized_prompt,
@@ -65,7 +107,7 @@ def video_provider_prompt(
         format_asset_graph_prompt_lines(asset_graph_context),
     ]
     if motion:
-        parts.append(f"Motion: {strip_image_edit_language(motion)}")
+        parts.append(f"Motion: {strip_keyframe_video_safety_language(motion)}")
     if last_frame_image_asset_id:
         parts.append("Use the last frame as the ending visual anchor; interpolate motion smoothly between first and last frame.")
     text_channel = context_bundle.get("text_channel") if isinstance(context_bundle, dict) else None
@@ -76,7 +118,7 @@ def video_provider_prompt(
             ("Director setup", "scene_director_segment"),
             ("Style", "preference_segment"),
         ):
-            value = strip_image_edit_language(str(text_channel.get(key) or "").strip())
+            value = strip_keyframe_video_safety_language(str(text_channel.get(key) or "").strip())
             if value:
                 parts.append(f"{label}: {value}")
     parts.extend(
@@ -162,7 +204,7 @@ def video_motion_plan(
     t1 = max(0.8, round(duration * 0.2, 1))
     t2 = max(t1 + 0.8, round(duration * 0.7, 1))
     final = round(duration, 1)
-    action = strip_image_edit_language(motion or "continue the current pose with subtle cinematic motion")
+    action = strip_keyframe_video_safety_language(motion or "continue the current pose with subtle cinematic motion")
     beats = [
         {"time": f"0.0s-{t1:.1f}s", "intent": "hold first-frame identity, layout, lighting, and pose as the visual anchor"},
         {"time": f"{t1:.1f}s-{t2:.1f}s", "intent": action},
@@ -193,7 +235,7 @@ def video_temporal_director_plan(
     duration = _duration_float(duration_sec)
     beat_count = max(1, min(int(round(duration)), 12))
     domains = _expert_domains(expert_knowledge)
-    action = strip_image_edit_language(motion or "continue the current first-frame action with restrained motion")
+    action = strip_keyframe_video_safety_language(motion or "continue the current first-frame action with restrained motion")
     continuity = _asset_continuity_phrase(asset_graph_context)
     forbidden = _forbidden_video_changes(source_text, asset_graph_context)
     beats = []
@@ -575,9 +617,25 @@ def _has_stars(source_text: str) -> bool:
     return "star" in source_text.lower() or "\u661f" in source_text
 
 
+def _care_sensitive_video_text(text: str) -> bool:
+    return bool(
+        re.search(
+            r"猫|狗|犬|幼犬|奶狗|小狗|小猫|橘猫|儿童|孩子|小孩|学生|高中生|puppy|kitten|cat|dog|child|kid",
+            str(text or ""),
+            flags=re.I,
+        )
+    )
+
+
+def _legacy_keyframe_video_prompt_text(text: str) -> bool:
+    source = str(text or "")
+    return "图生视频时间轴" in source or "上游关键帧摘要" in source or "资产连续性锁定" in source
+
+
 __all__ = (
     "IMAGE_EDIT_REPLACEMENTS",
     "strip_image_edit_language",
+    "strip_keyframe_video_safety_language",
     "video_editing_plan",
     "video_generation_plan",
     "video_motion_plan",
