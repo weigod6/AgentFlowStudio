@@ -413,6 +413,7 @@ def _named_characters(text: str) -> list[str]:
     ):
         names.extend([_trim_character_name(left), _trim_character_name(right)])
     names.extend(_known_characters_in_source_order(text))
+    names.extend(_action_bound_character_names(text))
     if re.search(r"\bLin\s+Wan\b", text, flags=re.I):
         names.append("Lin Wan")
     if "女孩" in text:
@@ -422,6 +423,57 @@ def _named_characters(text: str) -> list[str]:
     if re.search(r"\bfuture robot\b|\brobot\b", text, flags=re.I):
         names.append("Future Robot")
     return _dedupe([name for name in names if name])
+
+
+def _action_bound_character_names(text: str) -> list[str]:
+    names: list[str] = []
+    action_re = re.compile(
+        r"(?<![\u4e00-\u9fff])([\u4e00-\u9fff]{2,4}?)(?="
+        r"单膝|双膝|抬头|低头|转身|侧身|回头|凝视|望向|看向|站|蹲|跪|坐|"
+        r"走|跑|追|冲|跃|扑|伸手|抬手|握|攥|死攥|拿|捧|抱|咬牙|喉结|瞳孔|"
+        r"肩|右臂|左臂|指节|手指|下颌|呼吸|开口|呛出|怔住|愣住"
+        r")"
+    )
+    for match in action_re.finditer(str(text or "")):
+        name = _trim_character_name(match.group(1))
+        if _looks_like_character_name(name):
+            names.append(name)
+    return _dedupe(names)
+
+
+def _looks_like_character_name(value: str) -> bool:
+    clean = str(value or "").strip()
+    if not clean or clean in GENERIC_CHARACTER_LABELS or clean in GENERIC_SCENE_LABELS:
+        return False
+    if clean in PRONOUN_LABELS:
+        return False
+    if _contains_any(
+        clean,
+        (
+            "暴雨",
+            "泥浆",
+            "古战场",
+            "战场",
+            "城墙",
+            "城垛",
+            "雷声",
+            "雨声",
+            "镜头",
+            "画面",
+            "远处",
+            "血色",
+            "残旗",
+            "军旗",
+            "断戟",
+            "虎符",
+            "竹简",
+            "试卷",
+            "草稿",
+            "启事",
+        ),
+    ):
+        return False
+    return bool(re.fullmatch(r"[\u4e00-\u9fff]{2,4}", clean))
 
 
 def _named_animal_characters(text: str) -> list[str]:

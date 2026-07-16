@@ -264,11 +264,30 @@ function namedCharacters(text) {
     names.push(trimCharacterName(match[1]), trimCharacterName(match[2]));
   }
   for (const item of knownCharactersInSourceOrder(text)) names.push(item);
+  for (const item of actionBoundCharacterNames(text)) names.push(item);
   if (/\bLin\s+Wan\b/i.test(text)) names.push("Lin Wan");
   if (text.includes("女孩")) names.push("女孩");
   if (text.includes("机器人")) names.push("机器人");
   if (/\bfuture robot\b|\brobot\b/i.test(text)) names.push("Future Robot");
   return [...new Set(names)];
+}
+
+function actionBoundCharacterNames(text) {
+  const names = [];
+  const source = String(text || "");
+  const actionRe = /(?<![\u4e00-\u9fff])([\u4e00-\u9fff]{2,4}?)(?=单膝|双膝|抬头|低头|转身|侧身|回头|凝视|望向|看向|站|蹲|跪|坐|走|跑|追|冲|跃|扑|伸手|抬手|握|攥|死攥|拿|捧|抱|咬牙|喉结|瞳孔|肩|右臂|左臂|指节|手指|下颌|呼吸|开口|呛出|怔住|愣住)/gu;
+  for (const match of source.matchAll(actionRe)) {
+    const name = trimCharacterName(match[1]);
+    if (looksLikeCharacterName(name)) names.push(name);
+  }
+  return [...new Set(names)];
+}
+
+function looksLikeCharacterName(value) {
+  const clean = String(value || "").trim();
+  if (!clean || GENERIC_CHARACTER_LABELS.has(clean) || GENERIC_SCENE_LABELS.has(clean) || PRONOUN_LABELS.has(clean)) return false;
+  if (["暴雨", "泥浆", "古战场", "战场", "城墙", "城垛", "雷声", "雨声", "镜头", "画面", "远处", "血色", "残旗", "军旗", "断戟", "虎符", "竹简", "试卷", "草稿", "启事"].some((term) => clean.includes(term))) return false;
+  return /^[\u4e00-\u9fff]{2,4}$/.test(clean);
 }
 
 function namedAnimalCharacters(text) {

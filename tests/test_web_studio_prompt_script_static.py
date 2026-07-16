@@ -1469,6 +1469,7 @@ process.stdout.write(JSON.stringify({ shot, text: structuredShotText(shot) }));
     assert "山巅石台战场" not in surface
     assert "@可见人物" not in surface
     assert "@山巅石台战场" not in surface
+    assert ("沈砚", "character") in refs
     assert ("古战场", "scene") in refs
     assert not payload["shot"]["description"].startswith("@")
 

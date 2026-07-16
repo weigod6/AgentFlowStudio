@@ -180,6 +180,7 @@ def test_storyboard_local_fallback_does_not_fabricate_generic_people_or_mountain
     assert "山巅石台战场" not in serialized
     assert "@可见人物" not in serialized
     assert "@山巅石台战场" not in serialized
+    assert ("沈砚", "character") in refs
     assert ("古战场", "scene") in refs
     assert all(not str(shot["description"]).startswith("@") for shot in shots)
 
@@ -407,6 +408,8 @@ def test_storyboard_breakdown_uses_llm_structured_json_when_gate_open(tmp_path, 
     assert "专业知识库约束" in provider_prompt
     assert "显示字段语言约束" in provider_prompt
     assert "不要在显示字段输出英文摄影、光影、声音术语" in provider_prompt
+    assert "主体优先约束" in provider_prompt
+    assert "asset_ref.evidence_text 必须是 source_span.text" in provider_prompt
     assert "storyboard_shot_numbering_handoff_v1" in provider_prompt
     assert payload["provider_calls_started"] is True
     assert payload["safe_manifest"]["status"] == "provider_structured"
