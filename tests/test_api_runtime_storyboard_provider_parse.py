@@ -372,13 +372,64 @@ def test_storyboard_provider_parser_types_animals_props_and_resolves_dog_corefer
     shot2_dropped = shots[1]["dropped_asset_ref_diagnostics"]
 
     assert shot2_refs["黑色拉布拉多"]["character_subtype"] == "animal"
-    assert "荧光绿网球" not in shot2_refs
-    assert any(
-        item["display_name"] == "荧光绿网球"
-        and item["asset_type"] == "prop"
-        and item["reason"] == "prop_requires_manual_asset_entry"
-        for item in shot2_dropped
-    )
+    assert shot2_refs["荧光绿网球"]["asset_type"] == "prop"
+    assert not any(item["display_name"] == "荧光绿网球" for item in shot2_dropped)
     assert "小华" in shot3_refs
     assert shot3_refs["黑色拉布拉多"]["character_subtype"] == "animal"
     assert shot3_refs["黑色拉布拉多"]["source"] == "cross_shot_coreference"
+
+
+def test_storyboard_provider_parser_supplements_grounded_scene_and_key_props_when_provider_omits_them() -> None:
+    span1 = (
+        "暴雨倾泻，泥浆翻涌的古战场俯拍全景；沈砚单膝深陷泥中，右臂青筋暴起，"
+        "死攥半截断戟，指节泛白；左肩甲裂开焦痕，血混雨水淌入衣领褶皱"
+    )
+    span5 = "他咬牙撑戟欲起，断戟忽震，嗡鸣刺耳，戟尖泥下赫然露出半枚青铜虎符，刻纹凸起"
+    payload = {
+        "shots": [
+            {
+                "shot_id": "shot_01",
+                "index": 1,
+                "duration": "2.8",
+                "description": span1,
+                "shot_size": "全景",
+                "light_atmosphere": "冷灰主调",
+                "camera_motion": "缓慢下压俯角",
+                "dialogue": "无明确对白",
+                "sound": "暴雨轰鸣",
+                "source_span": {"text": span1},
+                "asset_refs": [
+                    {"label": "沈砚", "asset_type": "character", "status": "mentioned", "source": "explicit"}
+                ],
+            },
+            {
+                "shot_id": "shot_05",
+                "index": 5,
+                "duration": "2.3",
+                "description": "低角度特写：沈砚咬牙撑戟欲起，断戟突然震颤嗡鸣；戟尖下方赫然露出半枚青铜虎符。",
+                "shot_size": "特写",
+                "light_atmosphere": "虎符表面湿漉反光",
+                "camera_motion": "急速下摇",
+                "dialogue": "无明确对白",
+                "sound": "断戟高频嗡鸣",
+                "source_span": {"text": span5},
+                "asset_refs": [],
+            },
+        ]
+    }
+
+    shots = shots_from_provider_text(
+        json.dumps(payload, ensure_ascii=False),
+        source_script_text=f"{span1}。{span5}。",
+    )
+    serialized = json.dumps(shots, ensure_ascii=False)
+    shot1_refs = {(item["label"], item["asset_type"]) for item in shots[0]["asset_refs"]}
+    shot5_refs = {(item["label"], item["asset_type"]) for item in shots[1]["asset_refs"]}
+
+    assert ("沈砚", "character") in shot1_refs
+    assert ("古战场", "scene") in shot1_refs
+    assert ("断戟", "prop") in shot1_refs
+    assert ("断戟", "prop") in shot5_refs
+    assert ("青铜虎符", "prop") in shot5_refs
+    assert "山巅石台战场" not in serialized
+    assert "可见人物" not in serialized

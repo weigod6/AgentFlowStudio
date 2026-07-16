@@ -55,6 +55,18 @@ PROP_REFERENCE_TERMS = (
     "牵引绳",
     "狗绳",
     "毛线团",
+    "断戟",
+    "青铜虎符",
+    "虎符",
+    "竹简",
+    "军旗",
+    "残旗",
+    "旧军籍册",
+    "军籍册",
+    "试卷",
+    "草稿纸",
+    "寻狗启事",
+    "启事",
     "手机",
     "地图",
     "钥匙",
@@ -69,6 +81,52 @@ PROP_REFERENCE_TERMS = (
     "棒",
     "武器",
     "道具",
+)
+KEY_PROP_ACTION_TERMS = (
+    "手持",
+    "死攥",
+    "攥",
+    "握",
+    "拿",
+    "捧",
+    "叼",
+    "吐",
+    "顶",
+    "拾起",
+    "翻转",
+    "展开",
+    "散开",
+    "露出",
+    "震颤",
+    "嗡鸣",
+    "照亮",
+    "反射",
+    "检查",
+    "查看",
+    "写着",
+    "批注",
+    "锁定",
+    "递",
+)
+KEY_PROP_LABEL_TERMS = (
+    "断戟",
+    "青铜虎符",
+    "虎符",
+    "竹简",
+    "军旗",
+    "残旗",
+    "旧军籍册",
+    "军籍册",
+    "金箍棒",
+    "钢爪",
+    "荧光绿网球",
+    "网球",
+    "红绳",
+    "牵引绳",
+    "狗绳",
+    "寻狗启事",
+    "启事",
+    "地图",
 )
 HUMAN_REFERENCE_TERMS = (
     "高中生",
@@ -165,11 +223,7 @@ def normalize_asset_refs_with_diagnostics(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     candidates = [item for item in asset_refs if isinstance(item, dict)]
     if include_inferred:
-        specific_types = _specific_asset_types(candidates)
-        candidates = [
-            *candidates,
-            *[item for item in _inferred_asset_refs(context) if item.get("asset_type") not in specific_types],
-        ]
+        candidates = [*candidates, *_inferred_asset_refs(context)]
 
     accepted: list[dict[str, Any]] = []
     diagnostics: list[dict[str, Any]] = []
@@ -186,7 +240,7 @@ def normalize_asset_refs_with_diagnostics(
             diagnostic_key = (diagnostic["asset_type"], diagnostic["display_name"], diagnostic["reason"])
             if diagnostic_key not in {(item["asset_type"], item["display_name"], item["reason"]) for item in diagnostics}:
                 diagnostics.append(diagnostic)
-    return accepted, diagnostics
+    return _drop_subsumed_asset_refs(accepted), diagnostics
 
 
 def principal_asset_refs_with_diagnostics(
@@ -195,11 +249,13 @@ def principal_asset_refs_with_diagnostics(
     *,
     max_auto_characters: int = 2,
     max_auto_scenes: int = 1,
+    max_auto_props: int = 2,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     accepted: list[dict[str, Any]] = []
     diagnostics: list[dict[str, Any]] = list(dropped_refs or [])
     auto_character_count = 0
     auto_scene_count = 0
+    auto_prop_count = 0
     for ref in asset_refs:
         asset_type = str(ref.get("asset_type") or "")
         if _is_manual_or_fixed_asset_ref(ref):
@@ -207,7 +263,11 @@ def principal_asset_refs_with_diagnostics(
             continue
         explicit_named = _is_explicit_named_asset_ref(ref)
         if asset_type == "prop":
-            diagnostics.append(_principal_diagnostic(ref, "prop_requires_manual_asset_entry"))
+            if auto_prop_count < max_auto_props and _is_key_prop_ref(ref):
+                accepted.append({**ref, "status": str(ref.get("status") or "candidate")})
+                auto_prop_count += 1
+            else:
+                diagnostics.append(_principal_diagnostic(ref, "prop_requires_manual_asset_entry"))
             continue
         if asset_type == "character":
             if explicit_named or auto_character_count < max_auto_characters:
@@ -309,10 +369,30 @@ def _inferred_asset_refs(context: str) -> list[dict[str, Any]]:
     refs: list[dict[str, Any]] = []
     for name in _named_characters(text):
         refs.append({"label": name, "asset_type": "character", "source": "candidate", "evidence_text": text})
+    for name in _named_animal_characters(text):
+        refs.append(
+            {
+                "label": name,
+                "asset_type": "character",
+                "character_subtype": "animal",
+                "source": "grounded_mention",
+                "evidence_text": text,
+            }
+        )
     scene_name = _visual_scene_name(text)
     if scene_name:
         refs.append({"label": scene_name, "asset_type": "scene", "source": "candidate", "evidence_text": text})
-    return refs
+    for name in _visual_prop_names(text):
+        refs.append(
+            {
+                "label": name,
+                "asset_type": "prop",
+                "status": "prop_relevant",
+                "source": "grounded_mention",
+                "evidence_text": text,
+            }
+        )
+    return _drop_subsumed_asset_refs(refs)
 
 
 def _specific_asset_types(candidates: list[dict[str, Any]]) -> set[str]:
@@ -342,6 +422,24 @@ def _named_characters(text: str) -> list[str]:
     if re.search(r"\bfuture robot\b|\brobot\b", text, flags=re.I):
         names.append("Future Robot")
     return _dedupe([name for name in names if name])
+
+
+def _named_animal_characters(text: str) -> list[str]:
+    source = str(text or "")
+    names: list[str] = []
+    quoted_alias = re.compile(
+        r"(?:拉布拉多|金毛|边牧|柯基|哈士奇|柴犬|奶狗|幼犬|小狗|狗狗|橘猫|狸花猫|黑猫|白猫|小猫|猫咪|猫|狗|犬)[“\"]([\u4e00-\u9fffA-Za-z0-9·]{1,8})[”\"]"
+    )
+    names.extend(match.group(1) for match in quoted_alias.finditer(source))
+    breed_pattern = re.compile(
+        r"((?:黑色|白色|灰色|棕色|黄色|金色|橘色|灰白相间|黑白相间)?(?:拉布拉多|金毛|边牧|柯基|哈士奇|贵宾犬|萨摩耶|柴犬)(?:幼崽|幼犬)?)"
+    )
+    names.extend(match.group(1) for match in breed_pattern.finditer(source))
+    longer_species_present = any(term in source for term in ("拉布拉多", "金毛", "边牧", "柯基", "哈士奇", "柴犬", "奶狗", "幼犬", "小狗", "橘猫", "狸花猫", "黑猫", "白猫", "小猫"))
+    for term in ("奶狗", "幼犬", "小狗", "狗狗", "橘猫", "狸花猫", "黑猫", "白猫", "小猫", "猫咪", "猫", "狗", "犬"):
+        if term in source and (len(term) > 1 or not longer_species_present):
+            names.append(term)
+    return _dedupe([name for name in names if name and name not in PRONOUN_LABELS])
 
 
 def _known_characters_in_source_order(text: str) -> list[str]:
@@ -382,6 +480,9 @@ def _visual_scene_name(text: str) -> str:
     if _has_negated_visual_context(text):
         return ""
     lowered = text.lower()
+    grounded_scene = _grounded_scene_name(text)
+    if grounded_scene:
+        return grounded_scene
     if "rain-night city street" in lowered:
         return "rain-night city street"
     if "city street" in lowered or ("street" in lowered and "city" in lowered):
@@ -395,6 +496,89 @@ def _visual_scene_name(text: str) -> str:
     if "城市" in text and any(term in text for term in ("街道", "天际线", "建筑", "高楼", "霓虹", "湿路", "路面", "灯光")):
         return "城市街道"
     return ""
+
+
+def _grounded_scene_name(text: str) -> str:
+    source = str(text or "")
+    if "古战场" in source:
+        return "古战场"
+    if "老城区巷口" in source:
+        return "老城区巷口"
+    if "斜坡草甸" in source:
+        return "斜坡草甸"
+    if re.search(r"山巅|山脊|云海", source) and "战场" in source:
+        return "山巅石台战场"
+    if "战场" in source:
+        return "战场"
+    patterns = (
+        r"([\u4e00-\u9fffA-Za-z0-9·]{0,10}(?:校门口|巷口|窄巷|巷子|公园长椅旁|公园长椅|公园|草甸|草坪|厨房|房间|屋顶|楼顶|天台|城墙|城垛|街道|走廊|宫殿|庭院|广场|餐厅|山洞|洞口|洞内))",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, source):
+            label = _clean_scene_label(match.group(1))
+            if label:
+                return label
+    return ""
+
+
+def _clean_scene_label(value: str) -> str:
+    clean = re.sub(r"^(?:在|从|向|朝|远处|路对面|空荡|焦黑|破碎|湿漉漉|梧桐树影斑驳的)+", "", str(value or "")).strip()
+    clean = re.sub(r"^.*(?:站在|坐在|蹲在|躺在|停在|来到|走进|冲向|落在|映着|在)", "", clean).strip()
+    clean = re.sub(r"(?:上|里|中|旁|边|外|内)$", lambda m: m.group(0) if clean.endswith(("旁", "边")) else "", clean)
+    if clean in GENERIC_SCENE_LABELS or len(clean) < 2:
+        return ""
+    if clean in {"青石台阶", "青砖", "石台"}:
+        return ""
+    return clean[:24]
+
+
+def _visual_prop_names(text: str) -> list[str]:
+    source = str(text or "")
+    names: list[str] = []
+    terms = sorted(PROP_REFERENCE_TERMS, key=len, reverse=True)
+    for term in terms:
+        if term and term in source:
+            names.append(_clean_prop_label(term))
+    object_pattern = re.compile(
+        r"(?:半截|半枚|一卷|一张|一只|一柄|一根|那柄|那张|那只|那截)?([\u4e00-\u9fffA-Za-z0-9·]{0,8}(?:断戟|青铜虎符|虎符|竹简|军旗|残旗|军籍册|试卷|草稿纸|寻狗启事|启事|网球|红绳|牵引绳|狗绳|毛线团|金箍棒|钢爪|地图|钥匙))"
+    )
+    names.extend(_clean_prop_label(match.group(1)) for match in object_pattern.finditer(source))
+    return _dedupe_non_overlapping([name for name in names if name])[:4]
+
+
+def _clean_prop_label(value: str) -> str:
+    clean = re.sub(r"^(?:磨损严重的|湿透|褪色|发光|半截|半枚|一卷|一张|一只|一柄|一根|那柄|那张|那只|那截)+", "", str(value or "")).strip()
+    for term in sorted((*KEY_PROP_LABEL_TERMS, *PROP_REFERENCE_TERMS), key=len, reverse=True):
+        if term and term in clean:
+            return term[:24]
+    return clean[:24]
+
+
+def _dedupe_non_overlapping(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in sorted(_dedupe(values), key=len, reverse=True):
+        if any(value != other and value in other for other in result):
+            continue
+        result.append(value)
+    return sorted(result, key=lambda item: values.index(item))
+
+
+def _drop_subsumed_asset_refs(refs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for ref in refs:
+        label = str(ref.get("label") or ref.get("display_name") or "").strip()
+        asset_type = str(ref.get("asset_type") or "")
+        if not label:
+            continue
+        if any(
+            asset_type == str(other.get("asset_type") or "")
+            and label != str(other.get("label") or other.get("display_name") or "")
+            and label in str(other.get("label") or other.get("display_name") or "")
+            for other in refs
+        ):
+            continue
+        result.append(ref)
+    return result
 
 
 def _visual_evidence_span(context: str, evidence: str, display_name: str, asset_type: str) -> str:
@@ -470,6 +654,28 @@ def _looks_like_prop_reference(label: str, evidence: str, context: str) -> bool:
     if _contains_any(label_text, PROP_REFERENCE_TERMS):
         return True
     if label_text in {"球", "ball"} and re.search(r"网球|球面|球体|吐在|叼着|tennis\s+ball", text, flags=re.I):
+        return True
+    return False
+
+
+def _is_key_prop_ref(ref: dict[str, Any]) -> bool:
+    label = str(ref.get("display_name") or ref.get("label") or "").strip()
+    evidence = _clean_text(
+        " ".join(
+            str(ref.get(key) or "")
+            for key in ("evidence_text", "visual_evidence_span", "descriptive_signature", "source_text")
+        )
+    )
+    status = str(ref.get("status") or "").lower()
+    source = str(ref.get("source") or "").lower()
+    if not label:
+        return False
+    if _contains_any(label, KEY_PROP_LABEL_TERMS) and (label in evidence or "explicit" in source or status in {"mentioned", "prop_relevant", "key_prop"}):
+        return True
+    window = f"{label} {evidence}"
+    if _contains_any(window, KEY_PROP_ACTION_TERMS) and _contains_any(label, PROP_REFERENCE_TERMS):
+        return True
+    if status in {"prop_relevant", "key_prop"} and label in evidence:
         return True
     return False
 

@@ -1473,7 +1473,7 @@ process.stdout.write(JSON.stringify({ shot, text: structuredShotText(shot) }));
     assert not payload["shot"]["description"].startswith("@")
 
 
-def test_storyboard_asset_recognition_prioritizes_principal_characters_and_manual_props() -> None:
+def test_storyboard_asset_recognition_prioritizes_principal_characters_and_key_props() -> None:
     script = r'''
 import { structuredShotFromSegment } from "./apps/studio/src/structured-shot.js";
 
@@ -1495,10 +1495,12 @@ process.stdout.write(JSON.stringify({
     )
     payload = json.loads(completed.stdout)
 
-    assert payload["refs"] == [["唐僧", "character"], ["白骨精", "character"]]
+    assert ["唐僧", "character"] in payload["refs"]
+    assert ["白骨精", "character"] in payload["refs"]
+    assert ["金箍棒", "prop"] in payload["refs"]
     assert ["孙悟空", "character", "secondary_character_requires_manual_asset_entry"] in payload["dropped"]
     assert ["猪八戒", "character", "secondary_character_requires_manual_asset_entry"] in payload["dropped"]
-    assert ["金箍棒", "prop", "prop_requires_manual_asset_entry"] in payload["dropped"]
+    assert ["金箍棒", "prop", "prop_requires_manual_asset_entry"] not in payload["dropped"]
 
 
 def test_asset_and_storyboard_cards_use_compact_editor_layout() -> None:

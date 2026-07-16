@@ -4,7 +4,9 @@ const ASSET_RE = /@([A-Za-z0-9_\-\u4e00-\u9fff·]+)/g;
 const SCENE_HINTS = ["主要场景", "场景", "办公室", "房间", "街道", "巷口", "窄巷", "巷子", "青石台阶", "青砖", "屋顶", "楼顶", "天台", "城市", "天际线", "森林", "海边", "山谷", "山巅", "山脊", "石台", "战场", "云海", "云栈洞口", "洞口", "洞内", "山洞", "餐厅", "车内", "走廊", "宫殿", "庭院", "广场", "屏幕"];
 const KNOWN_CHARACTER_NAMES = ["唐僧", "白骨精", "孙悟空", "猪八戒", "沙僧", "金刚狼", "林晚"];
 const CHARACTER_HINTS = ["主角", "角色", "人物", "女孩", "男孩", "女人", "男人", "老人", "孩子", "机器人", "队长", "老师", "学生", ...KNOWN_CHARACTER_NAMES];
-const PROP_HINTS = ["金箍棒", "钢爪", "手机", "电脑", "键盘", "刀", "剑", "棍", "棒", "车辆", "汽车", "信件", "信封", "信纸", "照片", "路灯", "台灯", "灯具", "灯柱", "书", "门"];
+const PROP_HINTS = ["荧光绿网球", "网球", "红绳", "牵引绳", "狗绳", "毛线团", "断戟", "青铜虎符", "虎符", "竹简", "军旗", "残旗", "旧军籍册", "军籍册", "试卷", "草稿纸", "寻狗启事", "启事", "金箍棒", "钢爪", "手机", "电脑", "键盘", "刀", "剑", "棍", "棒", "车辆", "汽车", "信件", "信封", "信纸", "照片", "路灯", "台灯", "灯具", "灯柱", "书", "门"];
+const KEY_PROP_LABELS = new Set(["断戟", "青铜虎符", "虎符", "竹简", "军旗", "残旗", "旧军籍册", "军籍册", "金箍棒", "钢爪", "荧光绿网球", "网球", "红绳", "牵引绳", "狗绳", "寻狗启事", "启事", "地图"]);
+const KEY_PROP_ACTION_RE = /手持|死攥|攥|握|拿|捧|叼|吐|顶|拾起|翻转|展开|散开|露出|震颤|嗡鸣|照亮|反射|检查|查看|写着|批注|锁定|递/;
 const GENERIC_CHARACTER_LABELS = new Set(["主角", "角色", "人物"]);
 const GENERIC_SCENE_LABELS = new Set(["主要场景", "场景"]);
 
@@ -122,13 +124,17 @@ function principalAssetExtraction(extraction) {
   const dropped = [...(Array.isArray(extraction?.dropped_asset_ref_diagnostics) ? extraction.dropped_asset_ref_diagnostics : [])];
   let autoCharacterCount = 0;
   let autoSceneCount = 0;
+  let autoPropCount = 0;
   for (const ref of refs) {
     const principal = isPrincipalOrManualAssetRef(ref);
     const manualOrFixed = isManualOrFixedAssetRef(ref);
     const explicitNamed = isExplicitNamedAssetRef(ref);
     const type = String(ref.asset_type || "");
-    if (principal && (manualOrFixed || type === "prop")) {
+    if (manualOrFixed) {
       accepted.push(ref);
+    } else if (principal && type === "prop" && autoPropCount < 2) {
+      accepted.push(ref);
+      autoPropCount += 1;
     } else if (principal && type === "character" && (explicitNamed || autoCharacterCount < 2)) {
       accepted.push(ref);
       if (!explicitNamed) autoCharacterCount += 1;
@@ -157,7 +163,7 @@ function principalDropReason(assetType) {
 
 function isPrincipalOrManualAssetRef(ref) {
   if (ref?.asset_type !== "prop") return true;
-  return isManualOrFixedAssetRef(ref);
+  return isManualOrFixedAssetRef(ref) || isKeyPropRef(ref);
 }
 
 function isManualOrFixedAssetRef(ref) {
@@ -173,6 +179,16 @@ function isExplicitNamedAssetRef(ref) {
   if (type === "prop") return false;
   if (!source.includes("explicit") && String(ref?.status || "").toLowerCase() !== "mentioned") return false;
   return !GENERIC_CHARACTER_LABELS.has(label) && !GENERIC_SCENE_LABELS.has(label);
+}
+
+function isKeyPropRef(ref) {
+  const label = String(ref?.label || ref?.display_name || "").trim();
+  const evidence = [ref?.evidence_text, ref?.visual_evidence_span, ref?.descriptive_signature, ref?.source_text].filter(Boolean).join(" ");
+  const status = String(ref?.status || "").toLowerCase();
+  const source = String(ref?.source || "").toLowerCase();
+  if (!label) return false;
+  if (KEY_PROP_LABELS.has(label) && (evidence.includes(label) || source.includes("explicit") || ["mentioned", "prop_relevant", "key_prop"].includes(status))) return true;
+  return KEY_PROP_ACTION_RE.test(`${label} ${evidence}`) && PROP_HINTS.some((term) => label.includes(term));
 }
 
 export function assetRefToken(asset) {

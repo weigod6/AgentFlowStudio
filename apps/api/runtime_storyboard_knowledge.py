@@ -44,6 +44,7 @@ def storyboard_instruction(request: StoryboardBreakdownRequest, storyboard_knowl
             "description 与 asset_refs 只能使用剧本已经出现或可由 source_span 直接支持的人物、动物、场景、道具和数量关系；不要给未命名角色擅自取名。",
             "如果剧本没有出现某个具体道具、角色名、额外人数/动物数量或场景结构，不要把它写进 description，也不要写进 asset_refs。",
             "asset_refs 每项必须包含 label, asset_type(character|scene|prop), status, source, evidence_text, confidence；当 asset_type=character 时必须包含 character_subtype(human|animal|robot|subject)。",
+            "每个镜头的 asset_refs 必须覆盖该镜头画面中可复用的主要角色/动物主体、明确地点或空间场景，以及会影响连续性的关键道具；不要只列角色而漏掉正在发生动作的场景或关键物件。",
             "猫、狗、犬、鸟、马、龙、拉布拉多、柴犬、奶狗等动物主体必须标为 asset_type=character 且 character_subtype=animal；人类角色必须标为 human。",
             "同一动物或角色后续被写成“狗/猫/它/他/她/那只狗”等代词时，必须回指到前文已建立的真实 label，例如“黑色拉布拉多”，不要新建泛化资产，也不要漏掉它。",
             "道具只能使用 asset_type=prop；例如网球、绳子、手机、地图、武器不能写成 character。默认不把普通道具晋升为角色或场景资产；只有对后续画面连续性必须固定的关键道具才作为 prop 引用。",

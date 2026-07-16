@@ -64,14 +64,58 @@ const VISUAL_CHARACTER_TERMS = [
   "孙悟空",
   "猪八戒",
 ];
+const ANIMAL_REFERENCE_TERMS = [
+  "拉布拉多",
+  "金毛",
+  "边牧",
+  "柯基",
+  "哈士奇",
+  "柴犬",
+  "奶狗",
+  "幼犬",
+  "小狗",
+  "狗狗",
+  "橘猫",
+  "狸花猫",
+  "黑猫",
+  "白猫",
+  "小猫",
+  "猫咪",
+  "猫",
+  "狗",
+  "犬",
+];
+const PROP_REFERENCE_TERMS = [
+  "荧光绿网球",
+  "网球",
+  "红绳",
+  "牵引绳",
+  "狗绳",
+  "毛线团",
+  "断戟",
+  "青铜虎符",
+  "虎符",
+  "竹简",
+  "军旗",
+  "残旗",
+  "旧军籍册",
+  "军籍册",
+  "试卷",
+  "草稿纸",
+  "寻狗启事",
+  "启事",
+  "金箍棒",
+  "钢爪",
+  "地图",
+  "钥匙",
+];
 
 export function normalizeAssetExtractionRefs(assetRefs, options = {}) {
   const context = cleanText(options.context || "");
   const includeInferred = Boolean(options.includeInferred);
   const candidates = Array.isArray(assetRefs) ? assetRefs.filter((item) => item && typeof item === "object") : [];
   if (includeInferred) {
-    const specificTypes = specificAssetTypes(candidates);
-    candidates.push(...inferredAssetRefs(context).filter((item) => !specificTypes.has(item.asset_type)));
+    candidates.push(...inferredAssetRefs(context));
   }
   const accepted = [];
   const dropped = [];
@@ -93,11 +137,11 @@ export function normalizeAssetExtractionRefs(assetRefs, options = {}) {
       }
     }
   });
-  return { asset_refs: accepted, dropped_asset_ref_diagnostics: dropped };
+  return { asset_refs: dropSubsumedAssetRefs(accepted), dropped_asset_ref_diagnostics: dropped };
 }
 
 export function normalizeAssetRefForContract(asset, index = 0, context = "") {
-  const assetType = ASSET_TYPES.has(asset?.asset_type) ? asset.asset_type : "character";
+  let assetType = ASSET_TYPES.has(asset?.asset_type) ? asset.asset_type : "character";
   const rawLabel = cleanLabel(asset?.display_name || asset?.label || asset?.name || "");
   if (!rawLabel) return { ref: null, diagnostic: null };
   const evidence = cleanText(asset?.evidence_text || asset?.visual_evidence_span || context);
@@ -106,6 +150,7 @@ export function normalizeAssetRefForContract(asset, index = 0, context = "") {
   let provisionalName = Boolean(asset?.provisional_name);
   let nameSource = String(asset?.name_source || asset?.source || "candidate");
 
+  if (assetType === "character" && looksLikePropReference(rawLabel, evidence, contextText)) assetType = "prop";
   if (assetType === "scene" && isAudioOnlyCityReference(rawLabel, evidence, contextText)) {
     return { ref: null, diagnostic: diagnostic(rawLabel, assetType, "audio_only_non_visual_city_reference", evidence || contextText) };
   }
@@ -191,9 +236,15 @@ function stringList(value) {
 function inferredAssetRefs(context) {
   const refs = [];
   for (const name of namedCharacters(context)) refs.push({ label: name, asset_type: "character", source: "candidate", evidence_text: context });
+  for (const name of namedAnimalCharacters(context)) {
+    refs.push({ label: name, asset_type: "character", character_subtype: "animal", source: "grounded_mention", evidence_text: context });
+  }
   const sceneName = visualSceneName(context);
   if (sceneName) refs.push({ label: sceneName, asset_type: "scene", source: "candidate", evidence_text: context });
-  return refs;
+  for (const name of visualPropNames(context)) {
+    refs.push({ label: name, asset_type: "prop", status: "prop_relevant", source: "grounded_mention", evidence_text: context });
+  }
+  return dropSubsumedAssetRefs(refs);
 }
 
 function specificAssetTypes(candidates) {
@@ -218,6 +269,20 @@ function namedCharacters(text) {
   if (text.includes("机器人")) names.push("机器人");
   if (/\bfuture robot\b|\brobot\b/i.test(text)) names.push("Future Robot");
   return [...new Set(names)];
+}
+
+function namedAnimalCharacters(text) {
+  const source = String(text || "");
+  const names = [];
+  const quotedAliasRe = /(?:拉布拉多|金毛|边牧|柯基|哈士奇|柴犬|奶狗|幼犬|小狗|狗狗|橘猫|狸花猫|黑猫|白猫|小猫|猫咪|猫|狗|犬)[“"]([\u4e00-\u9fffA-Za-z0-9·]{1,8})[”"]/gu;
+  for (const match of source.matchAll(quotedAliasRe)) names.push(match[1]);
+  const breedRe = /((?:黑色|白色|灰色|棕色|黄色|金色|橘色|灰白相间|黑白相间)?(?:拉布拉多|金毛|边牧|柯基|哈士奇|贵宾犬|萨摩耶|柴犬)(?:幼崽|幼犬)?)/gu;
+  for (const match of source.matchAll(breedRe)) names.push(match[1]);
+  const longerSpeciesPresent = ["拉布拉多", "金毛", "边牧", "柯基", "哈士奇", "柴犬", "奶狗", "幼犬", "小狗", "橘猫", "狸花猫", "黑猫", "白猫", "小猫"].some((term) => source.includes(term));
+  for (const term of ["奶狗", "幼犬", "小狗", "狗狗", "橘猫", "狸花猫", "黑猫", "白猫", "小猫", "猫咪", "猫", "狗", "犬"]) {
+    if (source.includes(term) && (term.length > 1 || !longerSpeciesPresent)) names.push(term);
+  }
+  return [...new Set(names)].filter(Boolean);
 }
 
 function knownCharactersInSourceOrder(text) {
@@ -249,6 +314,8 @@ function provisionalCharacterName(text) {
 function visualSceneName(text) {
   if (hasNegatedVisualContext(text)) return "";
   const lower = text.toLowerCase();
+  const grounded = groundedSceneName(text);
+  if (grounded) return grounded;
   if (lower.includes("rain-night city street")) return "rain-night city street";
   if (lower.includes("city street") || (lower.includes("street") && lower.includes("city"))) return "city street";
   if (lower.includes("rooftop") && lower.includes("city")) return "city rooftop";
@@ -256,6 +323,68 @@ function visualSceneName(text) {
   if (text.includes("城市") && text.includes("屋顶")) return "城市屋顶";
   if (text.includes("城市") && ["街道", "天际线", "建筑", "高楼", "霓虹", "湿路", "路面", "灯光"].some((term) => text.includes(term))) return "城市街道";
   return "";
+}
+
+function groundedSceneName(text) {
+  const source = String(text || "");
+  if (source.includes("古战场")) return "古战场";
+  if (source.includes("老城区巷口")) return "老城区巷口";
+  if (source.includes("斜坡草甸")) return "斜坡草甸";
+  if (/山巅|山脊|云海/.test(source) && source.includes("战场")) return "山巅石台战场";
+  if (source.includes("战场")) return "战场";
+  const sceneRe = /([\u4e00-\u9fffA-Za-z0-9·]{0,10}(?:校门口|巷口|窄巷|巷子|公园长椅旁|公园长椅|公园|草甸|草坪|厨房|房间|屋顶|楼顶|天台|城墙|城垛|街道|走廊|宫殿|庭院|广场|餐厅|山洞|洞口|洞内))/gu;
+  for (const match of source.matchAll(sceneRe)) {
+    const label = cleanSceneLabel(match[1]);
+    if (label) return label;
+  }
+  return "";
+}
+
+function cleanSceneLabel(value) {
+  const clean = String(value || "")
+    .replace(/^(?:在|从|向|朝|远处|路对面|空荡|焦黑|破碎|湿漉漉|梧桐树影斑驳的)+/, "")
+    .replace(/^.*(?:站在|坐在|蹲在|躺在|停在|来到|走进|冲向|落在|映着|在)/, "")
+    .replace(/(?:上|里|中|外|内)$/, "")
+    .trim();
+  if (!clean || GENERIC_SCENE_LABELS.has(clean) || ["青石台阶", "青砖", "石台"].includes(clean)) return "";
+  return clean.slice(0, 24);
+}
+
+function visualPropNames(text) {
+  const source = String(text || "");
+  const names = [];
+  for (const term of [...PROP_REFERENCE_TERMS].sort((a, b) => b.length - a.length)) {
+    if (source.includes(term)) names.push(cleanPropLabel(term));
+  }
+  const objectRe = /(?:半截|半枚|一卷|一张|一只|一柄|一根|那柄|那张|那只|那截)?([\u4e00-\u9fffA-Za-z0-9·]{0,8}(?:断戟|青铜虎符|虎符|竹简|军旗|残旗|军籍册|试卷|草稿纸|寻狗启事|启事|网球|红绳|牵引绳|狗绳|毛线团|金箍棒|钢爪|地图|钥匙))/gu;
+  for (const match of source.matchAll(objectRe)) names.push(cleanPropLabel(match[1]));
+  return dedupeNonOverlapping(names.filter(Boolean)).slice(0, 4);
+}
+
+function cleanPropLabel(value) {
+  const clean = String(value || "").replace(/^(?:磨损严重的|湿透|褪色|发光|半截|半枚|一卷|一张|一只|一柄|一根|那柄|那张|那只|那截)+/, "").trim();
+  const term = [...PROP_REFERENCE_TERMS].sort((a, b) => b.length - a.length).find((item) => item && clean.includes(item));
+  return (term || clean).slice(0, 24);
+}
+
+function dedupeNonOverlapping(values) {
+  const unique = [...new Set(values)];
+  const result = [];
+  for (const value of [...unique].sort((a, b) => b.length - a.length)) {
+    if (!result.some((other) => value !== other && other.includes(value))) result.push(value);
+  }
+  return result.sort((a, b) => values.indexOf(a) - values.indexOf(b));
+}
+
+function dropSubsumedAssetRefs(refs) {
+  return refs.filter((ref) => {
+    const label = String(ref?.label || ref?.display_name || "").trim();
+    const type = String(ref?.asset_type || "");
+    return !refs.some((other) => {
+      const otherLabel = String(other?.label || other?.display_name || "").trim();
+      return type === String(other?.asset_type || "") && label && otherLabel && label !== otherLabel && otherLabel.includes(label);
+    });
+  });
 }
 
 function visualEvidenceSpan(context, evidence, displayName, assetType) {
@@ -301,6 +430,13 @@ function hasVisualCharacterContext(text) {
 function hasNegatedVisualContext(text) {
   const lower = String(text || "").toLowerCase();
   return ["没有可见", "不可见", "无可见", "没有画面", "no visible", "not visible", "black screen"].some((term) => (isAscii(term) ? lower.includes(term) : text.includes(term)));
+}
+
+function looksLikePropReference(label, evidence, context) {
+  const text = `${label} ${evidence} ${context}`.toLowerCase();
+  const labelText = String(label || "").toLowerCase();
+  if (PROP_REFERENCE_TERMS.some((term) => labelText.includes(term.toLowerCase()))) return true;
+  return ["球", "ball"].includes(labelText) && /网球|球面|球体|吐在|叼着|tennis\s+ball/i.test(text);
 }
 
 function diagnostic(label, assetType, reason, evidence) {

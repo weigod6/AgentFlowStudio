@@ -12,12 +12,16 @@ def reconcile_cross_shot_asset_refs(shots: list[dict[str, Any]]) -> list[dict[st
     for shot in shots:
         refs = list(shot.get("asset_refs") or [])
         text = _shot_context_text(shot)
-        if _mentions_dog_coreference(text) and not _has_animal_ref(refs, "dog"):
+        if _mentions_dog_coreference(text):
             if ref := recent_animals.get("dog"):
-                refs.append(_coreference_ref(ref, text))
-        if _mentions_cat_coreference(text) and not _has_animal_ref(refs, "cat"):
+                refs = _drop_generic_animal_refs(refs, "dog")
+                if not _has_animal_ref(refs, "dog"):
+                    refs.append(_coreference_ref(ref, text))
+        if _mentions_cat_coreference(text):
             if ref := recent_animals.get("cat"):
-                refs.append(_coreference_ref(ref, text))
+                refs = _drop_generic_animal_refs(refs, "cat")
+                if not _has_animal_ref(refs, "cat"):
+                    refs.append(_coreference_ref(ref, text))
         refs, dropped_refs = principal_asset_refs_with_diagnostics(
             refs,
             list(shot.get("dropped_asset_ref_diagnostics") or []),
@@ -54,6 +58,14 @@ def _mentions_cat_coreference(text: str) -> bool:
 
 def _has_animal_ref(refs: list[dict[str, Any]], species: str) -> bool:
     return any(_animal_ref_species(ref) == species for ref in refs)
+
+
+def _drop_generic_animal_refs(refs: list[dict[str, Any]], species: str) -> list[dict[str, Any]]:
+    return [
+        ref
+        for ref in refs
+        if not (_animal_ref_species(ref) == species and str(ref.get("label") or ref.get("display_name") or "").strip() in {"狗", "犬", "猫"})
+    ]
 
 
 def _animal_ref_species(ref: dict[str, Any]) -> str:
