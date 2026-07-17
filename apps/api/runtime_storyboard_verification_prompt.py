@@ -53,12 +53,33 @@ def shot_verification_prompt(*, script_text: str, shot: dict[str, Any]) -> str:
             "4. label 必须保留剧本证据中的表面称呼。不要在本阶段把代词、别名或描述性称呼改成你猜测的实体名。",
             "4.1 机械合同：每个 asset_mentions.label 必须作为连续子串逐字出现在对应 evidence.quote 中。只要一个标签不满足，就不得返回 accepted；能依据原文修正时返回 corrected 和完整 corrected_shot，否则返回 rejected 或 requires_review。",
             "5. 画面描述、景别、光影、运镜、对白、音效是否相互一致，且没有无证据新增。",
-            "状态规则：完全正确用 accepted；可在不猜测实体的前提下修正用 corrected；存在事实错误用 rejected；存在无法由文本确定的指代或分类歧义用 requires_review。",
+            "状态规则：完全正确用 accepted；凡是能依据原文修复的字段错误都必须用 corrected，包括资产漏标/误标、标签与证据不一致、无依据新增和显示字段冲突，不得仅因这些可修复问题返回 rejected；只有无法在保持单镜头叙事位置的前提下修复时才用 rejected；文本本身存在指代或分类歧义时用 requires_review。",
             "accepted 不输出 corrected_shot。corrected 必须输出完整 corrected_shot，结构与输入镜头相同。",
             '输出结构：{"shot_id":"...","status":"accepted|corrected|rejected|requires_review","reason_codes":["..."],"corrected_shot":{...}}',
             "完整剧本：",
             script_text,
             "待核查镜头：",
+            json.dumps(shot, ensure_ascii=False, separators=(",", ":")),
+        ]
+    )
+
+
+def shot_repair_prompt(*, script_text: str, shot: dict[str, Any], reason_codes: list[str]) -> str:
+    return "\n".join(
+        [
+            "你是分镜合同修复器。只输出一个 JSON 对象，不要 Markdown。",
+            "上一次独立核查没有接受当前镜头。请重新对照完整剧本，修复当前镜头，而不是解释错误。",
+            "修复必须保持镜头编号和叙事位置，不得创造剧本中没有的角色、场景、道具、动作或事实。",
+            "逐项重建 asset_mentions：列出本镜实际出现或被直接操作的全部可复用角色、动物、场景和连续性道具；删除动作短语、身体部位、声音、光影及普通装饰。",
+            "每个 asset_mentions.label 必须是对应 evidence.quote 中逐字出现的连续子串；代词、别名和描述性称呼保持原文表面形式，由后续实体解析统一。",
+            "source_evidence 和资产 evidence 必须逐字来自剧本；corrected_shot 必须完整包含所有显示字段、证据、资产提及和 unsupported_additions。",
+            "只要能依据原文修复，status 必须为 corrected 并输出完整 corrected_shot；只有确有文本歧义、无法安全修复时才用 requires_review；修复后仍存在事实冲突时用 rejected。不得返回 accepted。",
+            '{"shot_id":"...","status":"corrected|requires_review|rejected","reason_codes":["..."],"corrected_shot":{...}}',
+            "上次核查原因：",
+            json.dumps(reason_codes[:12], ensure_ascii=False, separators=(",", ":")),
+            "完整剧本：",
+            script_text,
+            "待修复镜头：",
             json.dumps(shot, ensure_ascii=False, separators=(",", ":")),
         ]
     )
@@ -97,4 +118,4 @@ def entity_resolution_prompt(*, script_text: str, shots: list[dict[str, Any]]) -
     )
 
 
-__all__ = ("entity_resolution_prompt", "generation_prompt", "shot_verification_prompt")
+__all__ = ("entity_resolution_prompt", "generation_prompt", "shot_repair_prompt", "shot_verification_prompt")

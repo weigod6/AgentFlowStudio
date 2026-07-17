@@ -5,10 +5,8 @@ from pathlib import Path
 from typing import Any
 
 from agentflow_studio.model_gateway.errors import ModelGatewayError
-from agentflow_studio.model_gateway.provider_adapter import ProviderDispatchRequest, load_provider_registry
-from apps.api.runtime_errors import RuntimeApiError
-from apps.api.runtime_llm_enhancement_dispatch import dispatch_llm_with_fallback
-from apps.api.runtime_models import PromptOptimizationRequest, StoryboardBreakdownRequest
+from agentflow_studio.model_gateway.provider_adapter import load_provider_registry
+from apps.api.runtime_models import StoryboardBreakdownRequest
 from apps.api.runtime_storyboard_contract_v2 import (
     StoryboardContractError,
     validate_storyboard_set,
@@ -19,82 +17,18 @@ from apps.api.runtime_storyboard_contract_v2 import (
 from apps.api.runtime_storyboard_json_v2 import StoryboardJsonError, json_object_from_provider_text
 from apps.api.runtime_storyboard_entity_resolver import materialize_verified_shots
 from apps.api.runtime_storyboard_knowledge import storyboard_knowledge_context, storyboard_llm_request
+from apps.api.runtime_storyboard_provider_session_v2 import (
+    PIPELINE_ID,
+    ProviderCallSession,
+    contract_pipeline_error as _contract_pipeline_error,
+    pipeline_error as _pipeline_error,
+)
 from apps.api.runtime_storyboard_verification_prompt import (
     entity_resolution_prompt,
     generation_prompt,
+    shot_repair_prompt,
     shot_verification_prompt,
 )
-
-
-PIPELINE_ID = "provider_verified_v2"
-
-
-class ProviderCallSession:
-    def __init__(
-        self,
-        registry: Any,
-        llm_request: PromptOptimizationRequest,
-        output_dir: Path,
-        *,
-        max_calls: int,
-    ) -> None:
-        self.registry = registry
-        self.llm_request = llm_request
-        self.output_dir = output_dir
-        self.max_calls = max_calls
-        self.call_count = 0
-        self.cache_hits = 0
-        self._cache: dict[str, str] = {}
-
-    def call(self, prompt: str, *, stage: str, timeout_sec: float) -> str:
-        cache_key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-        if cache_key in self._cache:
-            self.cache_hits += 1
-            return self._cache[cache_key]
-        if self.call_count >= self.max_calls:
-            raise _pipeline_error(
-                "provider_output_invalid",
-                stage="call_budget",
-                message="分镜验证所需调用超过本次安全预算，请减少镜头数量后重试。",
-                details={"max_calls": self.max_calls},
-            )
-        self.call_count += 1
-        request = ProviderDispatchRequest(
-            prompt=prompt,
-            output_dir=self.output_dir / stage,
-            task_type=f"storyboard_{stage}",
-            timeout_sec=timeout_sec,
-        )
-        try:
-            result = dispatch_llm_with_fallback(self.registry, self.llm_request, request)
-        except ModelGatewayError as exc:
-            raise _pipeline_error(
-                "provider_unavailable",
-                stage=stage,
-                message="LLM 服务暂时不可用，未生成本地替代分镜。请检查服务后重试。",
-                status_code=503,
-                retryable=True,
-                details={"attempted_calls": self.call_count},
-            ) from exc
-        text = str(result.get("text") or "").strip() if isinstance(result, dict) else ""
-        if not text:
-            raise _pipeline_error(
-                "provider_output_invalid",
-                stage=stage,
-                message="LLM 返回了空结果，未生成本地替代分镜。",
-                details={"attempted_calls": self.call_count},
-            )
-        self._cache[cache_key] = text
-        return text
-
-    def summary(self) -> dict[str, Any]:
-        return {
-            "call_count": self.call_count,
-            "cache_hits": self.cache_hits,
-            "max_calls": self.max_calls,
-            "max_concurrency": 1,
-            "raw_provider_response_stored": False,
-        }
 
 
 def build_provider_verified_storyboard_v2(
@@ -148,20 +82,13 @@ def build_provider_verified_storyboard_v2(
     verified_shots: list[dict[str, Any]] = []
     verification_records: list[dict[str, Any]] = []
     for shot in generated_shots:
-        try:
-            verification_text = session.call(
-                shot_verification_prompt(script_text=request.script_text, shot=shot),
-                stage=f"verify_{int(shot['index']):02d}",
-                timeout_sec=45.0,
-            )
-            status, verified_shot, reasons = validated_verifier_result(
-                json_object_from_provider_text(verification_text),
-                shot,
-                request.script_text,
-            )
-        except (StoryboardContractError, StoryboardJsonError) as exc:
-            raise _contract_pipeline_error("verification_failed", "shot_verification_contract", exc) from exc
-        record = {"shot_id": shot["shot_id"], "status": status, "reason_codes": reasons}
+        status, verified_shot, reasons, repair_attempted = _review_shot(session, request.script_text, shot)
+        record = {
+            "shot_id": shot["shot_id"],
+            "status": status,
+            "reason_codes": reasons,
+            "repair_attempted": repair_attempted,
+        }
         verification_records.append(record)
         if status == "requires_review":
             raise _pipeline_error(
@@ -227,6 +154,7 @@ def build_provider_verified_storyboard_v2(
             "shot_count": len(shots),
             "accepted_count": sum(item["status"] == "accepted" for item in verification_records),
             "corrected_count": sum(item["status"] == "corrected" for item in verification_records),
+            "repair_count": sum(bool(item["repair_attempted"]) for item in verification_records),
             "entity_count": len(entities),
             "unresolved_count": 0,
             "semantic_fallback_used": False,
@@ -234,6 +162,57 @@ def build_provider_verified_storyboard_v2(
             "idempotency_key": _idempotency_key(request),
         },
     }
+
+
+def _review_shot(
+    session: ProviderCallSession,
+    script_text: str,
+    shot: dict[str, Any],
+) -> tuple[str, dict[str, Any], list[str], bool]:
+    try:
+        verification_text = session.call(
+            shot_verification_prompt(script_text=script_text, shot=shot),
+            stage=f"verify_{int(shot['index']):02d}",
+            timeout_sec=45.0,
+        )
+        verification_payload = json_object_from_provider_text(verification_text)
+    except StoryboardJsonError as exc:
+        raise _contract_pipeline_error("verification_failed", "shot_verification_contract", exc) from exc
+    try:
+        status, verified_shot, reasons = validated_verifier_result(verification_payload, shot, script_text)
+    except StoryboardContractError as exc:
+        return _repair_shot(session, script_text, shot, [exc.reason])
+    if status == "rejected" or verified_shot.get("unsupported_additions"):
+        repair_reasons = [*reasons]
+        if verified_shot.get("unsupported_additions"):
+            repair_reasons.append("unsupported_additions")
+        return _repair_shot(session, script_text, shot, repair_reasons)
+    return status, verified_shot, reasons, False
+
+
+def _repair_shot(
+    session: ProviderCallSession,
+    script_text: str,
+    shot: dict[str, Any],
+    reason_codes: list[str],
+) -> tuple[str, dict[str, Any], list[str], bool]:
+    try:
+        repair_text = session.call(
+            shot_repair_prompt(script_text=script_text, shot=shot, reason_codes=reason_codes),
+            stage=f"repair_{int(shot['index']):02d}",
+            timeout_sec=60.0,
+        )
+        status, repaired_shot, repair_reasons = validated_verifier_result(
+            json_object_from_provider_text(repair_text),
+            shot,
+            script_text,
+        )
+        if status == "accepted":
+            raise StoryboardContractError("shot repair must not accept the unchanged shot")
+    except (StoryboardContractError, StoryboardJsonError) as exc:
+        raise _contract_pipeline_error("verification_failed", "shot_repair_contract", exc) from exc
+    reasons = list(dict.fromkeys([*reason_codes, *repair_reasons]))[:12]
+    return status, repaired_shot, reasons, True
 
 
 def _knowledge_lines(context: dict[str, Any]) -> list[str]:
@@ -248,39 +227,6 @@ def _knowledge_lines(context: dict[str, Any]) -> list[str]:
         if len(result) >= 8:
             break
     return result
-
-
-def _contract_pipeline_error(state: str, stage: str, exc: ValueError) -> RuntimeApiError:
-    return _pipeline_error(
-        state,
-        stage=stage,
-        message="LLM 返回结果未通过结构与证据合同，未生成本地替代分镜。",
-        details={
-            "reason": str(getattr(exc, "reason", str(exc))),
-            **dict(getattr(exc, "details", {}) or {}),
-        },
-    )
-
-
-def _pipeline_error(
-    state: str,
-    *,
-    stage: str,
-    message: str,
-    status_code: int = 422,
-    user_action: str = "修正输入或服务状态后重新拆分分镜。",
-    retryable: bool = False,
-    details: dict[str, Any] | None = None,
-) -> RuntimeApiError:
-    return RuntimeApiError(
-        state,
-        message,
-        stage=stage,
-        status_code=status_code,
-        user_action=user_action,
-        retryable=retryable,
-        details={"pipeline": PIPELINE_ID, "pipeline_state": state, **(details or {})},
-    )
 
 
 def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:

@@ -310,6 +310,101 @@ def test_v2_revalidates_storyboard_set_after_shot_corrections(tmp_path, monkeypa
     assert detail["details"]["reason"] == "storyboard repeats the same source evidence"
 
 
+def test_v2_repairs_a_rejected_shot_once_without_semantic_fallback(tmp_path, monkeypatch) -> None:
+    script = "那只湿漉漉的动物停在门口。"
+    generated = _shot(script, 1, script, script, [("character", "动物")])
+    generated["asset_mentions"][0]["label"] = "黑犬"
+    corrected = _shot(script, 1, script, script, [("character", "动物")])
+    normalized = validated_generation({"shots": [corrected]}, script)[0]
+    resolver = {
+        "entities": [
+            _entity(script, "character", "animal", "动物", normalized["asset_mentions"], "state", "湿漉漉")
+        ],
+        "unresolved_mentions": [],
+    }
+    registry = SequenceRegistry(
+        {
+            "storyboard_generation": {"shots": [generated]},
+            "storyboard_verify_01": {
+                "shot_id": "shot_01",
+                "status": "rejected",
+                "reason_codes": ["missing_asset", "label_not_grounded"],
+            },
+            "storyboard_repair_01": {
+                "shot_id": "shot_01",
+                "status": "corrected",
+                "reason_codes": ["repaired_from_script"],
+                "corrected_shot": corrected,
+            },
+            "storyboard_entity_resolution": resolver,
+        }
+    )
+    client, project_id = _v2_client(tmp_path, monkeypatch, registry, "v2_repair_rejected")
+
+    response = _breakdown(client, project_id, script)
+
+    assert response.status_code == 200, response.text
+    summary = response.json()["verification_summary"]
+    assert summary["corrected_count"] == 1
+    assert summary["repair_count"] == 1
+    assert summary["semantic_fallback_used"] is False
+    assert summary["provider_call_summary"]["call_count"] == 4
+    assert response.json()["shots"][0]["asset_refs"][0]["label"] == "动物"
+
+
+def test_v2_repair_cannot_accept_the_unchanged_rejected_shot(tmp_path, monkeypatch) -> None:
+    script = "旅人停在门口。"
+    generated = _shot(script, 1, script, script, [("character", "旅人"), ("scene", "门口")])
+    registry = SequenceRegistry(
+        {
+            "storyboard_generation": {"shots": [generated]},
+            "storyboard_verify_01": {
+                "shot_id": "shot_01",
+                "status": "rejected",
+                "reason_codes": ["repairable_asset_error"],
+            },
+            "storyboard_repair_01": _accepted("shot_01"),
+        }
+    )
+    client, project_id = _v2_client(tmp_path, monkeypatch, registry, "v2_repair_must_correct")
+
+    response = _breakdown(client, project_id, script)
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["error"] == "verification_failed"
+    assert detail["stage"] == "shot_repair_contract"
+    assert detail["details"]["reason"] == "shot repair must not accept the unchanged shot"
+    assert len(registry.calls) == 3
+
+
+def test_v2_repairs_verifier_output_that_still_has_unsupported_additions(tmp_path, monkeypatch) -> None:
+    script = "雨停了。"
+    generated = _shot(script, 1, script, "雨停了，天空出现彩虹。", [])
+    generated["unsupported_additions"] = ["天空出现彩虹"]
+    corrected = _shot(script, 1, script, "雨停了。", [])
+    registry = SequenceRegistry(
+        {
+            "storyboard_generation": {"shots": [generated]},
+            "storyboard_verify_01": _accepted("shot_01"),
+            "storyboard_repair_01": {
+                "shot_id": "shot_01",
+                "status": "corrected",
+                "reason_codes": ["removed_unsupported_addition"],
+                "corrected_shot": corrected,
+            },
+        }
+    )
+    client, project_id = _v2_client(tmp_path, monkeypatch, registry, "v2_repair_unsupported")
+
+    response = _breakdown(client, project_id, script)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["verification_summary"]["repair_count"] == 1
+    assert response.json()["shots"][0]["description"] == "雨停了。"
+    assert response.json()["shots"][0]["unsupported_additions"] == []
+
+
 def test_v2_invalid_output_provider_failure_and_manual_review_fail_closed(tmp_path, monkeypatch) -> None:
     cases = [
         ("invalid", {"storyboard_generation": "not json"}, 422, "provider_output_invalid"),
@@ -514,6 +609,7 @@ def test_v2_implementation_has_no_local_semantic_fallback_or_example_name_rules(
             "runtime_storyboard_contract_fields_v2.py",
             "runtime_storyboard_generation_v2.py",
             "runtime_storyboard_json_v2.py",
+            "runtime_storyboard_provider_session_v2.py",
             "runtime_storyboard_entity_resolver.py",
             "runtime_storyboard_verification_prompt.py",
         )
@@ -528,6 +624,8 @@ def test_v2_implementation_has_no_local_semantic_fallback_or_example_name_rules(
     for module_name in (
         "runtime_storyboard_contract_v2.py",
         "runtime_storyboard_contract_fields_v2.py",
+        "runtime_storyboard_generation_v2.py",
+        "runtime_storyboard_provider_session_v2.py",
     ):
         assert len((api_root / module_name).read_text(encoding="utf-8").splitlines()) <= 300
 
