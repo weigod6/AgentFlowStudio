@@ -14,7 +14,7 @@ def build_asset_graph(
     source_text: str = "",
     graph_source: str = "storyboard",
 ) -> dict[str, Any]:
-    builders: dict[tuple[str, str], dict[str, Any]] = {}
+    builders: dict[str, dict[str, Any]] = {}
     relationships: list[dict[str, Any]] = []
     unsupported: list[dict[str, str]] = []
     held_asset_refs: list[dict[str, Any]] = []
@@ -45,7 +45,7 @@ def build_asset_graph(
             normalized = _normalize_ref(ref)
             if not normalized:
                 continue
-            key = (normalized["asset_type"], normalized["label"])
+            key = _asset_identity(normalized)
             builder = builders.setdefault(key, _new_asset_builder(normalized))
             _merge_ref(builder, normalized, shot_id, source_span)
             relationships.append(
@@ -58,6 +58,7 @@ def build_asset_graph(
                 }
             )
     assets = [_final_asset(builder) for builder in builders.values()]
+    _mark_same_label_entity_collisions(assets)
     graph = {
         "artifact_type": "agentflow_asset_graph",
         "schema_version": "0.1.0",
@@ -88,17 +89,23 @@ def attach_graph_asset_ids_to_shots(shots: list[dict[str, Any]], asset_graph: di
 
 
 def attach_graph_asset_ids_to_refs(refs: list[dict[str, Any]], asset_graph: dict[str, Any]) -> list[dict[str, Any]]:
-    index = {
+    label_index = {
         (str(asset.get("asset_type") or ""), str(asset.get("label") or "")): str(asset.get("graph_asset_id") or "")
         for asset in _list(asset_graph.get("assets"))
         if isinstance(asset, dict)
+    }
+    entity_index = {
+        str(asset.get("entity_id") or ""): str(asset.get("graph_asset_id") or "")
+        for asset in _list(asset_graph.get("assets"))
+        if isinstance(asset, dict) and asset.get("entity_id")
     }
     result: list[dict[str, Any]] = []
     for ref in refs if isinstance(refs, list) else []:
         if not isinstance(ref, dict):
             continue
         key = (str(ref.get("asset_type") or ""), str(ref.get("label") or ""))
-        graph_asset_id = index.get(key)
+        entity_id = str(ref.get("entity_id") or "")
+        graph_asset_id = entity_index.get(entity_id) or label_index.get(key)
         result.append({**ref, **({"graph_asset_id": graph_asset_id} if graph_asset_id else {})})
     return result
 
@@ -107,7 +114,8 @@ def _new_asset_builder(ref: dict[str, Any]) -> dict[str, Any]:
     asset_type = ref["asset_type"]
     label = ref["label"]
     return {
-        "graph_asset_id": f"graph:{asset_type}:{_slug(label)}",
+        "graph_asset_id": f"graph:{ref['entity_id']}" if ref.get("entity_id") else f"graph:{asset_type}:{_slug(label)}",
+        "entity_id": str(ref.get("entity_id") or ""),
         "asset_id": str(ref.get("asset_id") or ""),
         "asset_type": asset_type,
         "label": label,
@@ -118,6 +126,9 @@ def _new_asset_builder(ref: dict[str, Any]) -> dict[str, Any]:
         "name_sources": [],
         "provisional_name": False,
         "aliases": {label},
+        "character_subtypes": [],
+        "continuity_locks": [],
+        "negative_locks": [],
         "statuses": [str(ref.get("status") or "candidate")],
         "sources": [str(ref.get("source") or "candidate")],
         "confidences": [_confidence(ref.get("confidence"))],
@@ -130,6 +141,7 @@ def _merge_ref(builder: dict[str, Any], ref: dict[str, Any], shot_id: str, sourc
     if ref.get("asset_id") and not builder.get("asset_id"):
         builder["asset_id"] = str(ref.get("asset_id"))
     builder["aliases"].add(str(ref["label"]))
+    builder["aliases"].update(str(item) for item in _list(ref.get("aliases")) if str(item).strip())
     builder["statuses"].append(str(ref.get("status") or "candidate"))
     builder["sources"].append(str(ref.get("source") or "candidate"))
     builder["confidences"].append(_confidence(ref.get("confidence")))
@@ -146,6 +158,17 @@ def _merge_ref(builder: dict[str, Any], ref: dict[str, Any], shot_id: str, sourc
     if name_source and name_source not in builder["name_sources"]:
         builder["name_sources"].append(name_source)
     builder["provisional_name"] = bool(builder["provisional_name"] or ref.get("provisional_name"))
+    subtype = str(ref.get("character_subtype") or "").strip()
+    if subtype and subtype not in builder["character_subtypes"]:
+        builder["character_subtypes"].append(subtype)
+    for lock in _list(ref.get("continuity_locks")):
+        text = str(lock or "").strip()
+        if text and text not in builder["continuity_locks"]:
+            builder["continuity_locks"].append(text[:200])
+    for lock in _list(ref.get("negative_locks")):
+        text = str(lock or "").strip()
+        if text and text not in builder["negative_locks"]:
+            builder["negative_locks"].append(text[:200])
     if shot_id not in builder["shot_refs"]:
         builder["shot_refs"].append(shot_id)
     evidence = str(ref.get("evidence_text") or source_span.get("text") or "").strip()
@@ -165,6 +188,7 @@ def _final_asset(builder: dict[str, Any]) -> dict[str, Any]:
     evidence_text = " ".join(item["text"] for item in builder["evidence_spans"][:3])
     return {
         "graph_asset_id": builder["graph_asset_id"],
+        "entity_id": builder.get("entity_id") or "",
         "asset_id": builder.get("asset_id") or builder["graph_asset_id"],
         "asset_type": asset_type,
         "label": builder["label"],
@@ -173,7 +197,7 @@ def _final_asset(builder: dict[str, Any]) -> dict[str, Any]:
         "status": _merged_status(builder["statuses"]),
         "review_state": "candidate_review_required",
         "aliases": sorted(builder["aliases"]),
-        "merge_key": f"{asset_type}:{_slug(builder['label'])}",
+        "merge_key": builder.get("entity_id") or f"{asset_type}:{_slug(builder['label'])}",
         "confidence": round(max(builder["confidences"] or [0.6]), 3),
         "shot_refs": builder["shot_refs"][:24],
         "evidence_spans": builder["evidence_spans"][:12],
@@ -183,8 +207,9 @@ def _final_asset(builder: dict[str, Any]) -> dict[str, Any]:
         "modality_gate_status": "accepted",
         "name_source": (builder["name_sources"] or ["candidate"])[0],
         "provisional_name": bool(builder.get("provisional_name")),
-        "continuity_locks": _continuity_locks(asset_type, builder["label"], evidence_text),
-        "negative_locks": _negative_locks(asset_type, builder["label"], evidence_text),
+        "character_subtype": (builder.get("character_subtypes") or [""])[0],
+        "continuity_locks": builder.get("continuity_locks") or _continuity_locks(asset_type, builder["label"], evidence_text),
+        "negative_locks": builder.get("negative_locks") or _negative_locks(asset_type, builder["label"], evidence_text),
         "writes_long_term_memory": False,
         "writes_company_kb": False,
     }
@@ -204,6 +229,28 @@ def _normalize_ref(ref: dict[str, Any]) -> dict[str, Any]:
         "display_name": str(ref.get("display_name") or label)[:80],
         "confidence": _confidence(ref.get("confidence")),
     }
+
+
+def _asset_identity(ref: dict[str, Any]) -> str:
+    entity_id = str(ref.get("entity_id") or "").strip()
+    if entity_id:
+        return entity_id
+    return f"{ref['asset_type']}\x1f{ref['label']}"
+
+
+def _mark_same_label_entity_collisions(assets: list[dict[str, Any]]) -> None:
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for asset in assets:
+        if not str(asset.get("entity_id") or ""):
+            continue
+        key = (str(asset.get("asset_type") or ""), str(asset.get("label") or "").casefold())
+        groups.setdefault(key, []).append(asset)
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        for asset in group:
+            asset["identity_collision"] = True
+            asset["auto_binding_block_reasons"] = ["same_label_distinct_entities"]
 
 
 def _source_span(shot: dict[str, Any], source_text: str, index: int) -> dict[str, str]:

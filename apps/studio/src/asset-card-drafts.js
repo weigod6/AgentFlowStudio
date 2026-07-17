@@ -35,10 +35,18 @@ export function assetCardDraftFromRef(asset, structuredShot, options = {}) {
   const assetType = safeAssetType(asset?.asset_type);
   const label = safeLabel(asset?.label, assetType);
   const shotText = shotDescription(structuredShot);
-  const featureCard = defaultFeatureCard(assetType, label, shotText);
+  const providerVerified = asset?.verification_status === "verified" && Array.isArray(asset?.grounded_facts);
+  const entityKey = String(asset?.entity_id || asset?.graph_asset_id || "").trim();
+  const featureCard = providerVerified
+    ? verifiedFeatureCard(assetType, label, asset)
+    : defaultFeatureCard(assetType, label, shotText);
   return normalizeAssetCardDraft({
-    card_id: `asset_card:${structuredShot?.shot_id || "shot"}:${assetType}:${slug(label)}`,
+    card_id: entityKey
+      ? `asset_card:${slug(entityKey)}`
+      : `asset_card:${structuredShot?.shot_id || "shot"}:${assetType}:${slug(label)}`,
     asset_type: assetType,
+    character_subtype: String(asset?.character_subtype || ""),
+    entity_id: String(asset?.entity_id || ""),
     label,
     status: "draft",
     source: "shot_asset_recognition",
@@ -46,10 +54,12 @@ export function assetCardDraftFromRef(asset, structuredShot, options = {}) {
     source_shot_id: structuredShot?.shot_id || "",
     source_asset_ref: asset || {},
     role_in_shot: roleInShot(assetType, label),
-    signature: signatureFor(assetType, label, shotText),
+    signature: providerVerified ? verifiedSignature(label, asset) : signatureFor(assetType, label, shotText),
     feature_card: featureCard,
-    negative_locks: defaultLocks(assetType, label),
-    evidence_text: shotText.slice(0, 500),
+    negative_locks: providerVerified && Array.isArray(asset?.negative_locks)
+      ? asset.negative_locks
+      : defaultLocks(assetType, label),
+    evidence_text: providerVerified ? String(asset?.evidence_text || "").slice(0, 500) : shotText.slice(0, 500),
     memory_policy: {
       writes_fixed_asset: false,
       included_in_context_before_confirmation: false,
@@ -63,13 +73,18 @@ export function normalizeAssetCardDraft(draft) {
   const assetType = safeAssetType(draft?.asset_type);
   const label = safeLabel(draft?.label, assetType);
   const evidenceText = String(draft?.evidence_text || "");
+  const providerVerified = draft?.source_asset_ref?.verification_status === "verified";
   return {
     ...draft,
     asset_type: assetType,
     label,
     status: draft?.status || "draft",
-    signature: normalizedSignature(assetType, label, evidenceText, draft?.signature),
-    feature_card: normalizedFeatureCard(assetType, label, evidenceText, draft?.feature_card),
+    signature: providerVerified
+      ? String(draft?.signature || `${label}：身份已核查，外观事实待人工补充`).trim().slice(0, 160)
+      : normalizedSignature(assetType, label, evidenceText, draft?.signature),
+    feature_card: providerVerified
+      ? normalizedVerifiedFeatureCard(assetType, draft?.feature_card)
+      : normalizedFeatureCard(assetType, label, evidenceText, draft?.feature_card),
     negative_locks: lines(draft?.negative_locks),
     memory_policy: {
       writes_fixed_asset: false,
@@ -80,9 +95,20 @@ export function normalizeAssetCardDraft(draft) {
   };
 }
 
+function normalizedVerifiedFeatureCard(assetType, card) {
+  const source = card && typeof card === "object" ? card : {};
+  const result = {};
+  for (const [key] of assetCardFieldsForType(assetType)) {
+    const value = String(source[key] || "").replace(/\s+/g, " ").trim();
+    if (value) result[key] = value.slice(0, 260);
+  }
+  return result;
+}
+
 export function assetCardFieldsForType(assetType) { return ASSET_CARD_FIELDS[safeAssetType(assetType)] || ASSET_CARD_FIELDS.character; }
 
-export function assetCardTypeLabel(assetType) {
+export function assetCardTypeLabel(assetType, characterSubtype = "") {
+  if (safeAssetType(assetType) === "character" && characterSubtype === "animal") return "动物角色资产";
   return { character: "角色资产", scene: "场景资产", prop: "道具资产" }[safeAssetType(assetType)];
 }
 
@@ -94,7 +120,7 @@ export function assetCardText(draft) {
     ? card.negative_locks.map((item) => `- ${item}`)
     : ["- 确认固定前不进入生成约束"];
   return [
-    `资产类型：${assetCardTypeLabel(card.asset_type)}`,
+    `资产类型：${assetCardTypeLabel(card.asset_type, card.character_subtype)}`,
     `资产名称：@${card.label}`,
     "状态：候选草稿，确认固定前不会进入关键帧约束",
     `一句话签名：${card.signature}`,
@@ -142,6 +168,70 @@ function defaultFeatureCard(assetType, label, shotText) {
     demeanor: characterDemeanor(label, shotText),
     reference_views: "正面半身特写 + 全身正面居中 + 左侧面全身 + 背面全身；无任何道具或背景物体，比例与外观保持一致",
   };
+}
+
+function verifiedFeatureCard(assetType, label, asset) {
+  const facts = verifiedFactGroups(asset?.grounded_facts);
+  const pick = (...fields) => fields.flatMap((field) => facts[field] || []).filter(Boolean).join("；");
+  const missing = "剧本未提供独立可验证信息";
+  if (assetType === "scene") {
+    return {
+      location: pick("location") || label,
+      layout: pick("layout") || missing,
+      props: pick("element") || missing,
+      lighting_mood: pick("lighting") || missing,
+      palette: pick("palette", "color") || missing,
+      time_weather: pick("time_weather", "state") || missing,
+      view_set: "同一场景的俯瞰全景、正向广角、入口/边缘视角和材质细节视角，已验证空间事实保持一致",
+    };
+  }
+  if (assetType === "prop") {
+    return {
+      category: pick("category", "identity") || label,
+      appearance: pick("appearance", "color", "marking", "state") || missing,
+      material: pick("material") || missing,
+      scale: pick("scale") || missing,
+      usage: pick("usage") || missing,
+      interaction: pick("interaction", "relationship") || missing,
+      continuity: pick("state", "marking", "appearance") || "保持已验证事实和使用状态连续",
+      reference_views: "正面、侧面、俯视和局部结构/材质特写，已验证外观事实保持一致",
+    };
+  }
+  const subtype = { animal: "动物角色", human: "人物角色", robot: "机器人角色", other: "其他角色" }[asset?.character_subtype] || "角色";
+  const animalViews = "动物设定板：正面头部特写 + 全身正面 + 左侧面全身 + 背面全身；不新增衣物或配饰";
+  return {
+    identity: pick("identity", "species") || `${label}，${subtype}`,
+    appearance: pick("appearance", "color", "marking", "state") || missing,
+    hair: pick("color", "appearance", "marking") || missing,
+    face: pick("marking", "appearance") || missing,
+    build: pick("body", "species") || missing,
+    wardrobe: pick("clothing") || (asset?.character_subtype === "animal" ? "无剧本证据时不新增衣物或配饰" : missing),
+    palette: pick("color", "palette") || missing,
+    demeanor: pick("state", "relationship") || missing,
+    reference_views: asset?.character_subtype === "animal"
+      ? animalViews
+      : "正面半身特写 + 全身正面 + 左侧面全身 + 背面全身；已验证外观事实保持一致",
+  };
+}
+
+function verifiedFactGroups(items) {
+  const result = {};
+  for (const item of Array.isArray(items) ? items : []) {
+    const field = String(item?.field || "");
+    const fact = String(item?.fact || "").trim();
+    if (!field || !fact) continue;
+    if (!result[field]) result[field] = [];
+    if (!result[field].includes(fact)) result[field].push(fact);
+  }
+  return result;
+}
+
+function verifiedSignature(label, asset) {
+  const facts = (Array.isArray(asset?.grounded_facts) ? asset.grounded_facts : [])
+    .map((item) => String(item?.fact || "").trim())
+    .filter(Boolean);
+  const summary = facts.join("；") || String(asset?.descriptive_signature || "").trim() || "身份已核查，外观事实待人工补充";
+  return `${label}：${summary}`.slice(0, 160);
 }
 
 function signatureFor(assetType, label, shotText) {

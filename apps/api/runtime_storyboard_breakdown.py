@@ -8,13 +8,11 @@ from agentflow.algorithms.asset_card_candidates import build_asset_card_candidat
 from agentflow.algorithms.content_quality_evaluation import evaluate_storyboard_content_quality
 from agentflow.algorithms.evidence_ledger import build_storyboard_evidence_ledger
 from agentflow.algorithms.production_graph import build_storyboard_production_graph
-from agentflow_studio.model_gateway.errors import ModelGatewayError
-from agentflow_studio.model_gateway.provider_adapter import ProviderDispatchRequest, load_provider_registry
+from agentflow_studio.model_gateway.provider_adapter import load_provider_registry
 from apps.api.runtime_asset_graph import attach_graph_asset_ids_to_shots, build_asset_graph
-from apps.api.runtime_errors import safe_error_detail
+from apps.api.runtime_errors import RuntimeApiError, runtime_api_error_detail, safe_error_detail
 from apps.api.runtime_flow import build_flow_summary
 from apps.api.runtime_jobs import runtime_job
-from apps.api.runtime_llm_enhancement_dispatch import dispatch_llm_with_fallback
 from apps.api.runtime_llm_enhancement_gate import llm_provider_gate
 from apps.api.runtime_models import StoryboardBreakdownRequest
 from apps.api.runtime_storyboard_artifacts import write_storyboard_artifacts
@@ -22,11 +20,10 @@ from apps.api.runtime_storyboard_fallback import storyboard_fallback_message
 from apps.api.runtime_storyboard_fixed_assets import attach_fixed_visual_asset_refs
 from apps.api.runtime_storyboard_knowledge import (
     knowledge_rule_ids,
-    storyboard_instruction,
     storyboard_knowledge_context,
-    storyboard_llm_request,
 )
 from apps.api.runtime_storyboard_local import local_storyboard_shots
+from apps.api.runtime_storyboard_pipeline_select import select_storyboard_pipeline
 from apps.api.runtime_storyboard_provider_parse import shots_from_provider_text
 from apps.api.runtime_store import RuntimeStore, reject_unsafe_payload
 from apps.api.runtime_tracing import artifact_refs, write_run_trace
@@ -49,6 +46,17 @@ def register_runtime_storyboard_routes(app: FastAPI, store: RuntimeStore) -> Non
         try:
             fixed_visual_assets = [public_visual_asset(item) for item in list_visual_assets(store, project_id, status="fixed")]
             result = build_storyboard_breakdown(project_id, request, output_dir, fixed_visual_assets=fixed_visual_assets)
+        except RuntimeApiError as exc:
+            store.write_job(runtime_job(job_id, project_id, "storyboard_breakdown", "failed"))
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=runtime_api_error_detail(
+                    exc,
+                    project_id=project_id,
+                    node_id=request.node_id or "",
+                    action="storyboard_breakdown",
+                ),
+            ) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=safe_error_detail("invalid_storyboard_breakdown")) from exc
 
@@ -88,6 +96,8 @@ def register_runtime_storyboard_routes(app: FastAPI, store: RuntimeStore) -> Non
             "evidence_ledger": result["evidence_ledger"],
             "provider_gate": result["provider_gate"],
             "provider_calls_started": result["provider_calls_started"],
+            "pipeline": result["pipeline"],
+            "verification_summary": result["verification_summary"],
             "fallback_visible_to_user": result["fallback_visible_to_user"],
             "fallback_reason": result["fallback_reason"],
             "fallback_message": result["fallback_message"],
@@ -108,38 +118,22 @@ def build_storyboard_breakdown(
     fixed_visual_assets: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     gate = llm_provider_gate()
-    llm_request = storyboard_llm_request(request)
     storyboard_knowledge = storyboard_knowledge_context(request)
-    provider_calls_started = False
-    shots: list[dict[str, Any]] | None = None
-    status = "local_fallback"
-    discard_reason = None
-    fallback_reason = "llm_gate_blocked" if gate["status"] == "blocked" else None
-    if gate["status"] != "blocked":
-        try:
-            registry = load_provider_registry()
-            dispatch_request = ProviderDispatchRequest(
-                prompt=storyboard_instruction(request, storyboard_knowledge),
-                output_dir=output_dir,
-                task_type="storyboard_breakdown",
-            )
-            provider_result = dispatch_llm_with_fallback(registry, llm_request, dispatch_request)
-            provider_calls_started = bool(provider_result.get("provider_calls_started", True))
-            shots = shots_from_provider_text(str(provider_result.get("text") or ""), source_script_text=request.script_text)
-            status = "provider_structured"
-        except ValueError as exc:
-            discard_reason = _safe_reason(str(exc))
-            shots = None
-            status = "local_fallback"
-            fallback_reason = "provider_output_discarded" if provider_calls_started else "provider_output_unavailable"
-        except ModelGatewayError as exc:
-            discard_reason = _safe_reason(str(exc))
-            shots = None
-            provider_calls_started = False
-            status = "local_fallback"
-            fallback_reason = "provider_call_failed"
-    if not shots:
-        shots = local_storyboard_shots(request.script_text, request.shot_count_hint)
+    selected = select_storyboard_pipeline(
+        request,
+        output_dir,
+        gate=gate,
+        storyboard_knowledge=storyboard_knowledge,
+        registry_loader=load_provider_registry,
+        provider_parser=shots_from_provider_text,
+    )
+    shots = selected["shots"]
+    status = selected["status"]
+    pipeline = selected["pipeline"]
+    verification_summary = selected["verification_summary"]
+    provider_calls_started = selected["provider_calls_started"]
+    fallback_reason = selected["fallback_reason"]
+    discard_reason = selected["discard_reason"]
     fallback_visible_to_user = status == "local_fallback"
     fallback_message = storyboard_fallback_message(fallback_reason, discard_reason)
     shots = attach_fixed_visual_asset_refs(shots, fixed_visual_assets or [])
@@ -171,6 +165,9 @@ def build_storyboard_breakdown(
         "project_id": project_id,
         "node_id": request.node_id,
         "status": status,
+        "pipeline": pipeline,
+        "pipeline_state": verification_summary.get("status", "not_run"),
+        "verification_summary": verification_summary,
         "provider_gate": gate,
         "provider_calls_started": provider_calls_started,
         "fallback_visible_to_user": fallback_visible_to_user,
@@ -229,6 +226,8 @@ def build_storyboard_breakdown(
         "project_id": project_id,
         "node_id": request.node_id,
         "provider_output": provider_calls_started,
+        "pipeline": pipeline,
+        "verification_summary": verification_summary,
         "fallback_visible_to_user": fallback_visible_to_user,
         "fallback_reason": fallback_reason,
         "fallback_message": fallback_message,
@@ -249,6 +248,7 @@ def build_storyboard_breakdown(
         "shot_count_hint": request.shot_count_hint,
         "provider_gate": gate,
         "provider_calls_started": provider_calls_started,
+        "pipeline": pipeline,
         "raw_provider_response_stored": False,
         "knowledgebase_version": storyboard_knowledge["knowledgebase_version"],
         "knowledgebase_registry_hash": storyboard_knowledge["knowledgebase_registry_hash"],
@@ -264,6 +264,8 @@ def build_storyboard_breakdown(
     reject_unsafe_payload(evidence_ledger)
     return {
         "shots": shots,
+        "pipeline": pipeline,
+        "verification_summary": verification_summary,
         "provider_gate": gate,
         "provider_calls_started": provider_calls_started,
         "safe_manifest": safe_manifest,
@@ -279,13 +281,6 @@ def build_storyboard_breakdown(
         "fallback_reason": fallback_reason,
         "fallback_message": fallback_message,
     }
-
-
-def _safe_reason(value: str) -> str:
-    lowered = value.lower()
-    if any(term in lowered for term in ("api", "key", "secret", "token", "authorization", "cookie")):
-        return "llm provider configuration is not ready"
-    return " ".join(value.split())[:160] or "llm provider is not ready"
 
 
 __all__ = (

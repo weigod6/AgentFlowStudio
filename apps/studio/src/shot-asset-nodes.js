@@ -216,6 +216,8 @@ function contextMentionsAsset(context, label) {
 }
 
 function assetKey(asset) {
+  const entityId = String(asset?.entity_id || asset?.graph_asset_id || asset?.graphAssetId || "").trim();
+  if (entityId) return `entity:${entityId}`;
   const label = String(asset?.label || asset?.display_name || "").replace(/^@+/, "").trim().toLowerCase();
   const type = String(asset?.asset_type || "").trim().toLowerCase();
   return label && type ? `${type}:${label}` : "";
@@ -243,7 +245,7 @@ function applyAssetDraftToNode(store, nodeId, draft, structuredShot, scriptNodeI
     const node = s.nodes[nodeId];
     if (!node) return;
     const referenceStack = nodeReferenceStackForGraphBoundAssets(bindingGraph, { asset_refs: [asset] }, nodeId);
-    node.title = `${assetCardTypeLabel(draft.asset_type)} · @${draft.label}`;
+    node.title = `${assetCardTypeLabel(draft.asset_type, draft.character_subtype)} · @${draft.label}`;
     node.prompt = "";
     node.content = assetCardText(draft);
     node.status = "complete";

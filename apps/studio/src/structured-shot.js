@@ -62,7 +62,9 @@ export function structuredShotFromFormattedText(text, index) {
 export function structuredShotText(shot) {
   const assetLine = shot.asset_refs.length
     ? shot.asset_refs.map(assetRefDisplay).join("、")
-    : "@主角、@主要场景";
+    : shot.asset_refs_authoritative
+      ? "无明确可固定资产"
+      : "@主角、@主要场景";
   return [
     `镜号：${String(shot.index).padStart(2, "0")}`,
     `时长：${shot.duration}`,
@@ -99,6 +101,17 @@ export function normalizeShotAssetRefsWithDiagnostics(assetRefs, context = "") {
 
 export function refineStructuredShotAssets(shot, context = "") {
   if (!shot || typeof shot !== "object") return shot;
+  if (shot.asset_refs_authoritative === true || shot.asset_ref_authority === "runtime_provider_verified_v2") {
+    return {
+      ...shot,
+      asset_refs: Array.isArray(shot.asset_refs) ? shot.asset_refs : [],
+      asset_refs_authoritative: true,
+      asset_ref_authority: "runtime_provider_verified_v2",
+      dropped_asset_ref_diagnostics: Array.isArray(shot.dropped_asset_ref_diagnostics)
+        ? shot.dropped_asset_ref_diagnostics
+        : [],
+    };
+  }
   const source = [shot.description, shot.source_text, context].filter(Boolean).join("\n");
   const extraction = Array.isArray(shot.asset_refs) && shot.asset_refs.length
     ? principalAssetExtraction(normalizeAssetExtractionRefs(shot.asset_refs, { context: source, includeInferred: true }))

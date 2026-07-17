@@ -43,14 +43,19 @@ def build_shot_asset_plan(project_id: str, request: ShotAssetPlanRequest) -> dic
     text = _source_text(request)
     shot = request.shot if isinstance(request.shot, dict) else {}
     inferred_shot = _structured_from_request(shot, text)
-    refs = _normalized_refs(shot.get("asset_refs"), text)
-    refs.extend(_normalized_refs(inferred_shot.get("asset_refs"), text))
-    refs.extend(_normalized_refs(request.existing_assets, text))
-    refs = _apply_global_context(refs, request.script_text or text, text)
-    refs = _remove_generic_when_specific(refs)
-    refs = _dedupe_refs(refs)
-    refs = [_with_evidence(ref, text) for ref in refs]
-    refs, dropped_refs = principal_asset_refs_with_diagnostics(refs)
+    authoritative = _authoritative_shot(shot)
+    if authoritative:
+        refs = _authoritative_refs(shot.get("asset_refs"))
+        dropped_refs = list(shot.get("dropped_asset_ref_diagnostics") or [])
+    else:
+        refs = _normalized_refs(shot.get("asset_refs"), text)
+        refs.extend(_normalized_refs(inferred_shot.get("asset_refs"), text))
+        refs.extend(_normalized_refs(request.existing_assets, text))
+        refs = _apply_global_context(refs, request.script_text or text, text)
+        refs = _remove_generic_when_specific(refs)
+        refs = _dedupe_refs(refs)
+        refs = [_with_evidence(ref, text) for ref in refs]
+        refs, dropped_refs = principal_asset_refs_with_diagnostics(refs)
     graph_shot = _graph_shot(shot, inferred_shot, refs, text, dropped_refs)
     asset_graph = build_asset_graph([graph_shot], source_text=request.script_text or text, graph_source="shot_asset_plan")
     refs = attach_graph_asset_ids_to_refs(refs, asset_graph)
@@ -61,7 +66,8 @@ def build_shot_asset_plan(project_id: str, request: ShotAssetPlanRequest) -> dic
         "schema_version": "0.1.0",
         "project_id": project_id,
         "node_id": request.node_id,
-        "status": "local_asset_plan",
+        "status": "verified_asset_plan" if authoritative else "local_asset_plan",
+        "asset_refs_authoritative": authoritative,
         "provider_calls_started": False,
         "raw_provider_response_stored": False,
         "generated_media_bytes_stored": False,
@@ -114,6 +120,44 @@ def _structured_from_request(shot: dict[str, Any], text: str) -> dict[str, Any]:
     index = _safe_int(shot.get("index")) or _safe_int(_field(text, "镜号")) or 1
     description = str(shot.get("description") or _field(text, "画面描述") or text).strip()
     return structured_shot(description, index)
+
+
+def _authoritative_shot(shot: dict[str, Any]) -> bool:
+    return bool(
+        shot.get("asset_refs_authoritative") is True
+        or str(shot.get("asset_ref_authority") or "") == "runtime_provider_verified_v2"
+    )
+
+
+def _authoritative_refs(items: Any) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        asset_type = str(item.get("asset_type") or "").strip()
+        label = str(item.get("label") or item.get("display_name") or "").strip()[:80]
+        entity_id = str(item.get("entity_id") or "").strip()
+        if asset_type not in {"character", "scene", "prop"} or not label:
+            continue
+        key = entity_id or f"{asset_type}\x1f{label}"
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(
+            {
+                **item,
+                "label": label,
+                "display_name": str(item.get("display_name") or label)[:80],
+                "asset_type": asset_type,
+                "entity_id": entity_id,
+                "status": str(item.get("status") or "verified_candidate"),
+                "source": str(item.get("source") or "provider_verified_v2"),
+                "modality_gate_status": "accepted",
+                "verification_status": "verified",
+            }
+        )
+    return result
 
 
 def _apply_global_context(refs: list[dict[str, Any]], script_text: str, shot_text: str) -> list[dict[str, Any]]:

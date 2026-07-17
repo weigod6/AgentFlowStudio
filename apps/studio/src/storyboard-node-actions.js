@@ -21,7 +21,9 @@ export function createStoryboardKeyframeLayer(store, node) {
 async function plannedStructuredShot(store, runtime, node) {
   const fresh = store.get().nodes[node.id] || node;
   const scriptText = currentScriptText(fresh);
-  const localShot = currentTextMatchesStructuredShot(fresh.params?.structuredShot, scriptText)
+  const authoritativeShot = fresh.params?.structuredShot?.asset_refs_authoritative === true
+    || fresh.params?.structuredShot?.asset_ref_authority === "runtime_provider_verified_v2";
+  const localShot = authoritativeShot || currentTextMatchesStructuredShot(fresh.params?.structuredShot, scriptText)
     ? fresh.params.structuredShot
     : structuredShotFromSegment(scriptText, Number(fresh.params?.scriptSegmentIndex || 1));
   if (!runtime?.planShotAssets) return localShot;
@@ -46,9 +48,15 @@ async function plannedStructuredShot(store, runtime, node) {
       description: scriptText || localShot?.description || "",
       source_text: scriptText || localShot?.source_text || "",
       asset_refs: assetRefs,
+      asset_refs_authoritative: Boolean(localShot?.asset_refs_authoritative),
+      asset_ref_authority: String(localShot?.asset_ref_authority || ""),
     };
   } catch {
-    setNodeError(store, fresh.id, "资产规划暂时不可用，已使用本地识别结果。");
+    setNodeError(
+      store,
+      fresh.id,
+      authoritativeShot ? "资产规划暂时不可用，保留 Runtime 已验证资产。" : "资产规划暂时不可用，已使用本地识别结果。",
+    );
     return localShot;
   }
 }

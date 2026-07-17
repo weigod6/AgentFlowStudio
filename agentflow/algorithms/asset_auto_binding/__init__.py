@@ -179,6 +179,11 @@ def _graph_block_reasons(asset_graph: dict[str, Any]) -> list[str]:
 
 def _candidate_block_reasons(candidate: dict[str, Any]) -> list[str]:
     reasons: list[str] = []
+    reasons.extend(
+        str(item).strip()
+        for item in _list(candidate.get("auto_binding_block_reasons"))
+        if str(item).strip()
+    )
     if not str(candidate.get("graph_asset_id") or ""):
         reasons.append("missing_graph_asset_id")
     if _confidence(candidate.get("confidence")) < MIN_BINDING_CONFIDENCE:

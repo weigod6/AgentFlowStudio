@@ -11,6 +11,7 @@ const SCRIPT_OPTIMIZER_LABEL_RE = /^\s*(意图|角色\/主体|人物\/主体|主
 const SCRIPT_WRAPPER_RE = /(请把下面的一句话扩写成正式短视频剧本正文|输出要求|原始想法|script_expansion_contract|formal_script_before_storyboard_breakdown|storyboard_placeholder_outline|source_idea)/i;
 const SCRIPT_TEMPLATE_FILLER_RE = /(推进主体|展示变化|收束结果|主角或核心物体|核心物体|保留下一步拆分分镜|Primary character|Primary scene)/;
 const EXPANDED_SCRIPT_MODES = new Set(["idea_expanded_script", "idea_expanded_script_fallback"]);
+const VERIFIED_STORYBOARD_PIPELINE = "provider_verified_v2";
 
 export function importScriptFileIntoTextNode(store, node, textarea = null) {
   const input = document.createElement("input");
@@ -139,6 +140,8 @@ export async function splitTextNodeToStoryboardNodes(store, node, runtime = null
       asset_node_ids: [],
       asset_nodes_created: false,
       provider_calls_started: Boolean(breakdown.provider_calls_started),
+      pipeline: breakdown.pipeline || VERIFIED_STORYBOARD_PIPELINE,
+      verificationSummary: breakdown.verification_summary || null,
       assetCardCandidates: breakdown.asset_card_candidates || null,
       assetCardCandidateArtifactId: breakdown.artifacts?.asset_card_candidates?.artifact_id || "",
       productionGraph: breakdown.production_graph || null,
@@ -312,6 +315,7 @@ function formalScriptExpansionPrompt(idea) {
 }
 
 async function loadStoryboardBreakdown(store, runtime, node, source) {
+  const requestedPipeline = String(node.params?.storyboardPipeline || VERIFIED_STORYBOARD_PIPELINE);
   if (runtime?.breakdownStoryboard) {
     try {
       const payload = await runtime.breakdownStoryboard({
@@ -321,6 +325,7 @@ async function loadStoryboardBreakdown(store, runtime, node, source) {
         style: "cinematic",
         node_parameters: {
           llm_provider: node.params?.llm_provider || node.params?.llmProvider || "prompt_optimizer",
+          storyboard_pipeline: requestedPipeline,
         },
         generated_at: new Date().toISOString(),
       });
@@ -329,6 +334,8 @@ async function loadStoryboardBreakdown(store, runtime, node, source) {
         return {
           shots,
           mode: payload?.safe_manifest?.status || "runtime_storyboard_breakdown",
+          pipeline: payload?.pipeline || requestedPipeline,
+          verification_summary: payload?.verification_summary || null,
           provider_calls_started: Boolean(payload?.provider_calls_started),
           asset_card_candidates: payload?.asset_card_candidates || null,
           production_graph: payload?.production_graph || null,
@@ -336,9 +343,19 @@ async function loadStoryboardBreakdown(store, runtime, node, source) {
           artifacts: payload?.artifacts || {},
         };
       }
+      setStoryboardBreakdownState(store, node.id, "error", "Runtime 未返回经验证的分镜，未创建本地替代结果。");
+      return { shots: [], mode: "provider_verified_v2_failed", pipeline: requestedPipeline };
     } catch (error) {
+      if (requestedPipeline !== "legacy_storyboard_v1") {
+        setStoryboardBreakdownState(store, node.id, "error", safeBreakdownError(error));
+        return { shots: [], mode: "provider_verified_v2_failed", pipeline: requestedPipeline };
+      }
       setStoryboardBreakdownState(store, node.id, "fallback", safeBreakdownError(error));
     }
+  }
+  if (requestedPipeline !== "legacy_storyboard_v1") {
+    setStoryboardBreakdownState(store, node.id, "error", "Runtime 不可用，严格分镜流程未执行。");
+    return { shots: [], mode: "provider_verified_v2_unavailable", pipeline: requestedPipeline };
   }
   return {
     shots: splitScriptIntoShots(source).map((segment, index) => structuredShotFromSegment(segment, index + 1)),
@@ -356,7 +373,18 @@ function normalizeStoryboardShot(shot, fallbackIndex) {
   if (typeof shot === "string") return structuredShotFromSegment(shot, fallbackIndex);
   const source = String(shot?.source_text || shot?.description || "").trim();
   const fallback = structuredShotFromSegment(source, fallbackIndex);
-  const normalizedAssets = Array.isArray(shot?.asset_refs) && shot.asset_refs.length
+  const authoritativeAssets = shot?.asset_refs_authoritative === true
+    || shot?.asset_ref_authority === "runtime_provider_verified_v2";
+  const normalizedAssets = authoritativeAssets
+    ? {
+        asset_refs: Array.isArray(shot?.asset_refs)
+          ? shot.asset_refs.map((asset, index) => normalizeAssetRef(asset, index)).filter(Boolean)
+          : [],
+        dropped_asset_ref_diagnostics: Array.isArray(shot?.dropped_asset_ref_diagnostics)
+          ? shot.dropped_asset_ref_diagnostics
+          : [],
+      }
+    : Array.isArray(shot?.asset_refs) && shot.asset_refs.length
     ? normalizeShotAssetRefsWithDiagnostics(
         shot.asset_refs.map((asset, index) => normalizeAssetRef(asset, index)).filter(Boolean),
         source || String(shot?.description || ""),
@@ -381,6 +409,9 @@ function normalizeStoryboardShot(shot, fallbackIndex) {
     asset_refs: assetRefs,
     dropped_asset_ref_diagnostics: droppedAssetRefDiagnostics,
     source_text: source || fallback.source_text,
+    asset_refs_authoritative: authoritativeAssets,
+    asset_ref_authority: authoritativeAssets ? "runtime_provider_verified_v2" : String(shot?.asset_ref_authority || ""),
+    verification: shot?.verification && typeof shot.verification === "object" ? shot.verification : null,
   };
 }
 
@@ -394,6 +425,7 @@ function normalizeAssetRef(asset, index) {
     display_name: String(asset.display_name || label),
     asset_id: String(asset.asset_id || `candidate:${type}:${index + 1}`),
     graph_asset_id: String(asset.graph_asset_id || asset.graphAssetId || ""),
+    entity_id: String(asset.entity_id || asset.entityId || ""),
     asset_type: type,
     status: String(asset.status || "candidate"),
     source: String(asset.source || "llm"),
@@ -403,6 +435,13 @@ function normalizeAssetRef(asset, index) {
     modality_gate_status: String(asset.modality_gate_status || ""),
     name_source: String(asset.name_source || ""),
     provisional_name: Boolean(asset.provisional_name),
+    character_subtype: String(asset.character_subtype || ""),
+    aliases: Array.isArray(asset.aliases) ? asset.aliases.map(String) : [],
+    mention_ids: Array.isArray(asset.mention_ids) ? asset.mention_ids.map(String) : [],
+    continuity_locks: Array.isArray(asset.continuity_locks) ? asset.continuity_locks.map(String) : [],
+    negative_locks: Array.isArray(asset.negative_locks) ? asset.negative_locks.map(String) : [],
+    grounded_facts: Array.isArray(asset.grounded_facts) ? asset.grounded_facts : [],
+    verification_status: String(asset.verification_status || ""),
   };
 }
 
@@ -468,6 +507,7 @@ function setStoryboardBreakdownState(store, nodeId, status, message = "") {
       updated_at: new Date().toISOString(),
     };
     if (status === "running") node.status = "generating";
+    if (status === "error") node.status = "error";
   }, { history: false, persist: false });
 }
 
