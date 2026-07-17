@@ -405,12 +405,51 @@ def test_v2_repairs_verifier_output_that_still_has_unsupported_additions(tmp_pat
     assert response.json()["shots"][0]["unsupported_additions"] == []
 
 
+def test_v2_repairs_generation_evidence_before_shot_review(tmp_path, monkeypatch) -> None:
+    script = "湿漉漉的动物停在门口。"
+    generated = _shot(script, 1, script, script, [("character", "动物"), ("scene", "门口")])
+    generated["source_evidence"][0]["quote"] = "一只湿漉漉的动物停在门口。"
+    corrected = _shot(script, 1, script, script, [("character", "动物"), ("scene", "门口")])
+    normalized = validated_generation({"shots": [corrected]}, script)[0]
+    resolver = {
+        "entities": [
+            _entity(script, "character", "animal", "动物", [normalized["asset_mentions"][0]], "state", "湿漉漉"),
+            _entity(script, "scene", "", "门口", [normalized["asset_mentions"][1]], "location", "门口"),
+        ],
+        "unresolved_mentions": [],
+    }
+    registry = SequenceRegistry(
+        {
+            "storyboard_generation": {"shots": [generated]},
+            "storyboard_generation_repair": {"shots": [corrected]},
+            "storyboard_verify_01": _accepted("shot_01"),
+            "storyboard_entity_resolution": resolver,
+        }
+    )
+    client, project_id = _v2_client(tmp_path, monkeypatch, registry, "v2_generation_repair")
+
+    response = _breakdown(client, project_id, script)
+
+    assert response.status_code == 200, response.text
+    summary = response.json()["verification_summary"]
+    assert summary["generation_repair_count"] == 1
+    assert summary["repair_count"] == 0
+    assert summary["semantic_fallback_used"] is False
+    assert summary["provider_call_summary"]["call_count"] == 4
+    assert response.json()["shots"][0]["source_evidence"][0]["quote"] == script
+
+
 def test_v2_invalid_output_provider_failure_and_manual_review_fail_closed(tmp_path, monkeypatch) -> None:
     cases = [
         ("invalid", {"storyboard_generation": "not json"}, 422, "provider_output_invalid"),
         (
             "partial",
-            {"storyboard_generation": {"shots": [{"shot_id": "shot_01", "index": 1, "duration": "3s"}]}},
+            {
+                "storyboard_generation": {"shots": [{"shot_id": "shot_01", "index": 1, "duration": "3s"}]},
+                "storyboard_generation_repair": {
+                    "shots": [{"shot_id": "shot_01", "index": 1, "duration": "3s"}]
+                },
+            },
             422,
             "provider_output_invalid",
         ),
@@ -441,6 +480,8 @@ def test_v2_invalid_output_provider_failure_and_manual_review_fail_closed(tmp_pa
             assert "read operation" not in detail["message"].lower()
         if suffix == "partial":
             details = response.json()["detail"]["details"]
+            assert response.json()["detail"]["stage"] == "generation_repair_contract"
+            assert details["initial_reason"] == "shot is missing a required display field"
             assert "description" in details["missing_fields"]
             assert details["fields"][0]["field"] == "description"
 

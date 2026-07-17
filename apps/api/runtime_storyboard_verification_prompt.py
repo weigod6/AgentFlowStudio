@@ -32,7 +32,7 @@ def generation_prompt(
             "不要把动作短语、代词指代之外的身体部位、情绪、气味、声音、光线、普通背景装饰或片名标成资产。",
             "每镜必须列出本镜实际出现或被直接操作的全部资产提及。不得因为资产在其他镜头出现而跨镜复制。",
             "asset_mentions.label 必须是 evidence.quote 中逐字出现的本镜表面称呼；遇到‘他/她/它/那把剑’等指代也保留表面称呼，后续实体解析器负责归并，不要擅自改名。",
-            "source_evidence 和每个资产 evidence 都必须逐字复制剧本连续原文。start/end 是 Python 字符索引，end 为开区间；不确定偏移时仍需给出 quote，系统只会在 quote 唯一出现时校正偏移。",
+            "source_evidence 和每个资产 evidence 都必须逐字复制剧本连续原文，quote 必须是 script_text 的直接连续子串，禁止概括、改写、翻译或补字。start/end 是 Python 字符索引，end 为开区间；不确定偏移时仍需给出 quote，系统只会在 quote 唯一出现时校正偏移。",
             "unsupported_additions 列出无法从剧本得到、但画面描述中新增的内容；正常应为空数组。",
             "严格输出以下结构：",
             '{"shots":[{"shot_id":"shot_01","index":1,"duration":"3s","description":"...","shot_size":"...","light_atmosphere":"...","camera_motion":"...","dialogue":"...","sound":"...","source_evidence":[{"quote":"剧本逐字片段","start":0,"end":6}],"asset_mentions":[{"asset_type":"character|scene|prop","label":"证据中的表面称呼","evidence":{"quote":"剧本逐字片段","start":0,"end":6},"relevance":"为什么是可复用视觉资产或连续性道具"}],"unsupported_additions":[]}]}',
@@ -60,6 +60,35 @@ def shot_verification_prompt(*, script_text: str, shot: dict[str, Any]) -> str:
             script_text,
             "待核查镜头：",
             json.dumps(shot, ensure_ascii=False, separators=(",", ":")),
+        ]
+    )
+
+
+def generation_repair_prompt(
+    *,
+    script_text: str,
+    generation_payload: dict[str, Any],
+    reason: str,
+    details: dict[str, Any],
+) -> str:
+    return "\n".join(
+        [
+            "你是整组分镜合同修复器。只输出一个 JSON 对象，不要 Markdown、解释或前后缀。",
+            "上一次分镜生成结果没有通过机械合同。请对照完整剧本修复整组 JSON，不要把错误文本原样返回。",
+            "保留叙事覆盖与镜头原子性；不得通过删除关键镜头、合并无关动作或创造新内容来规避校验。",
+            "所有显示字段必须非空；没有对白写‘无明确对白’，没有可确认音效写‘无明确音效’。",
+            "每条 source_evidence.quote 和资产 evidence.quote 必须逐字复制剧本中的连续原文，并且是 script_text 的直接子串；禁止概括、改写、翻译、补字或使用画面描述代替原文。",
+            "start/end 必须对应 Python 字符索引和开区间；无法可靠计算时仍需提供唯一的逐字 quote，系统会校正唯一匹配的偏移。",
+            "每个 asset_mentions.label 必须逐字出现在自己的 evidence.quote 中；按 character/scene/prop 语义分类，不使用固定名称词表。",
+            "shot_id 不得重复，index 必须从 1 连续递增；不同镜头不得复用同一 source_evidence，也不得打乱剧本叙事顺序。",
+            "unsupported_additions 只记录画面描述里确实无法由剧本支持的新增内容；修复时优先删除无依据新增，使其正常为空数组。",
+            "严格保持输入的 {\"shots\":[...]} 结构，并输出修复后的完整镜头对象。",
+            "首次失败原因：",
+            json.dumps({"reason": reason, "details": details}, ensure_ascii=False, separators=(",", ":")),
+            "完整剧本：",
+            script_text,
+            "待修复生成结果：",
+            json.dumps(generation_payload, ensure_ascii=False, separators=(",", ":")),
         ]
     )
 
@@ -118,4 +147,10 @@ def entity_resolution_prompt(*, script_text: str, shots: list[dict[str, Any]]) -
     )
 
 
-__all__ = ("entity_resolution_prompt", "generation_prompt", "shot_repair_prompt", "shot_verification_prompt")
+__all__ = (
+    "entity_resolution_prompt",
+    "generation_prompt",
+    "generation_repair_prompt",
+    "shot_repair_prompt",
+    "shot_verification_prompt",
+)
