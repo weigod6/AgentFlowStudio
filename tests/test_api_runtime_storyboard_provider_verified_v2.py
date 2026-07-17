@@ -11,9 +11,15 @@ from agentflow_studio.model_gateway.errors import ModelGatewayError
 from apps.api.runtime_asset_graph import build_asset_graph
 from apps.api.runtime_models import StoryboardBreakdownRequest
 from apps.api.runtime_service import create_runtime_app
-from apps.api.runtime_storyboard_contract_v2 import StoryboardContractError, validated_generation, validated_resolution
+from apps.api.runtime_storyboard_contract_v2 import (
+    StoryboardContractError,
+    validated_generation,
+    validated_resolution,
+    validated_verifier_result,
+)
 from apps.api.runtime_storyboard_generation_v2 import ProviderCallSession
 from apps.api.runtime_storyboard_knowledge import storyboard_llm_request
+from apps.api.runtime_storyboard_verification_prompt import shot_verification_prompt
 
 
 PIPELINE_PARAMS = {"llm_provider": "prompt_optimizer", "storyboard_pipeline": "provider_verified_v2"}
@@ -220,6 +226,90 @@ def test_v2_verifier_correction_replaces_generator_asset_errors(tmp_path, monkey
     assert "手指" not in {item["label"] for item in payload["asset_graph"]["assets"]}
 
 
+def test_v2_allows_verifier_to_correct_ungrounded_generator_label(tmp_path, monkeypatch) -> None:
+    script = "那只湿漉漉的动物停在门口。"
+    generated = _shot(script, 1, script, script, [("character", "动物")])
+    generated["asset_mentions"][0]["label"] = "黑犬"
+    normalized_generated = validated_generation({"shots": [generated]}, script)[0]
+    verifier_prompt = shot_verification_prompt(script_text=script, shot=normalized_generated)
+    assert "必须作为连续子串逐字出现在对应 evidence.quote 中" in verifier_prompt
+    assert "不得返回 accepted" in verifier_prompt
+    try:
+        validated_verifier_result(
+            {"shot_id": "shot_01", "status": "accepted", "reason_codes": []},
+            normalized_generated,
+            script,
+        )
+    except StoryboardContractError as exc:
+        assert exc.reason == "asset mention label is not present in its evidence"
+    else:
+        raise AssertionError("verifier cannot accept an ungrounded generator label")
+
+    corrected = _shot(script, 1, script, script, [("character", "动物")])
+    normalized_corrected = validated_generation({"shots": [corrected]}, script)[0]
+    resolver = {
+        "entities": [
+            _entity(
+                script,
+                "character",
+                "animal",
+                "动物",
+                normalized_corrected["asset_mentions"],
+                "state",
+                "湿漉漉",
+            )
+        ],
+        "unresolved_mentions": [],
+    }
+    registry = SequenceRegistry(
+        {
+            "storyboard_generation": {"shots": [generated]},
+            "storyboard_verify_01": {
+                "shot_id": "shot_01",
+                "status": "corrected",
+                "reason_codes": ["mention_label_not_grounded"],
+                "corrected_shot": corrected,
+            },
+            "storyboard_entity_resolution": resolver,
+        }
+    )
+    client, project_id = _v2_client(tmp_path, monkeypatch, registry, "v2_label_correction")
+
+    response = _breakdown(client, project_id, script)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["shots"][0]["asset_refs"][0]["label"] == "动物"
+    assert response.json()["verification_summary"]["corrected_count"] == 1
+
+
+def test_v2_revalidates_storyboard_set_after_shot_corrections(tmp_path, monkeypatch) -> None:
+    script = "门打开。灯熄灭。"
+    first = _shot(script, 1, "门打开。", "门缓慢打开。", [])
+    second = _shot(script, 2, "灯熄灭。", "灯光突然熄灭。", [])
+    invalid_correction = _shot(script, 2, "门打开。", "灯光突然熄灭。", [])
+    registry = SequenceRegistry(
+        {
+            "storyboard_generation": {"shots": [first, second]},
+            "storyboard_verify_01": _accepted("shot_01"),
+            "storyboard_verify_02": {
+                "shot_id": "shot_02",
+                "status": "corrected",
+                "reason_codes": ["invalid_source_evidence"],
+                "corrected_shot": invalid_correction,
+            },
+        }
+    )
+    client, project_id = _v2_client(tmp_path, monkeypatch, registry, "v2_final_set_validation")
+
+    response = _breakdown(client, project_id, script)
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["error"] == "verification_failed"
+    assert detail["stage"] == "verified_storyboard_contract"
+    assert detail["details"]["reason"] == "storyboard repeats the same source evidence"
+
+
 def test_v2_invalid_output_provider_failure_and_manual_review_fail_closed(tmp_path, monkeypatch) -> None:
     cases = [
         ("invalid", {"storyboard_generation": "not json"}, 422, "provider_output_invalid"),
@@ -410,6 +500,7 @@ def test_v2_implementation_has_no_local_semantic_fallback_or_example_name_rules(
         (api_root / name).read_text(encoding="utf-8")
         for name in (
             "runtime_storyboard_contract_v2.py",
+            "runtime_storyboard_contract_fields_v2.py",
             "runtime_storyboard_generation_v2.py",
             "runtime_storyboard_json_v2.py",
             "runtime_storyboard_entity_resolver.py",
@@ -422,6 +513,12 @@ def test_v2_implementation_has_no_local_semantic_fallback_or_example_name_rules(
     assert "local_storyboard_shots" not in v2_sources
     for example_name in ("小明", "小华", "橘猫", "煤球", "沈砚", "拉布拉多", "断戟", "青铜虎符"):
         assert example_name not in v2_sources
+
+    for module_name in (
+        "runtime_storyboard_contract_v2.py",
+        "runtime_storyboard_contract_fields_v2.py",
+    ):
+        assert len((api_root / module_name).read_text(encoding="utf-8").splitlines()) <= 300
 
 
 def test_same_label_distinct_entities_are_not_auto_bound_to_one_fixed_asset() -> None:

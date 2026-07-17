@@ -51,6 +51,7 @@ def shot_verification_prompt(*, script_text: str, shot: dict[str, Any]) -> str:
             "2. character/scene/prop 是否按语义分类；动物属于 character；剧情或连续性关键物件属于 prop。",
             "3. 是否漏掉本镜实际出现或被直接操作的角色、动物、场景或连续性道具；是否误把动作、身体部位、感官描述、声音、光影或普通背景装饰当资产。",
             "4. label 必须保留剧本证据中的表面称呼。不要在本阶段把代词、别名或描述性称呼改成你猜测的实体名。",
+            "4.1 机械合同：每个 asset_mentions.label 必须作为连续子串逐字出现在对应 evidence.quote 中。只要一个标签不满足，就不得返回 accepted；能依据原文修正时返回 corrected 和完整 corrected_shot，否则返回 rejected 或 requires_review。",
             "5. 画面描述、景别、光影、运镜、对白、音效是否相互一致，且没有无证据新增。",
             "状态规则：完全正确用 accepted；可在不猜测实体的前提下修正用 corrected；存在事实错误用 rejected；存在无法由文本确定的指代或分类歧义用 requires_review。",
             "accepted 不输出 corrected_shot。corrected 必须输出完整 corrected_shot，结构与输入镜头相同。",

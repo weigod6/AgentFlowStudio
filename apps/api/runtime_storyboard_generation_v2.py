@@ -11,6 +11,7 @@ from apps.api.runtime_llm_enhancement_dispatch import dispatch_llm_with_fallback
 from apps.api.runtime_models import PromptOptimizationRequest, StoryboardBreakdownRequest
 from apps.api.runtime_storyboard_contract_v2 import (
     StoryboardContractError,
+    validate_storyboard_set,
     validated_generation,
     validated_resolution,
     validated_verifier_result,
@@ -185,6 +186,11 @@ def build_provider_verified_storyboard_v2(
                 details={"shot_id": shot["shot_id"]},
             )
         verified_shots.append(verified_shot)
+
+    try:
+        validate_storyboard_set(verified_shots)
+    except StoryboardContractError as exc:
+        raise _contract_pipeline_error("verification_failed", "verified_storyboard_contract", exc) from exc
 
     mentions = [mention for shot in verified_shots for mention in shot.get("asset_mentions", [])]
     entities: list[dict[str, Any]] = []

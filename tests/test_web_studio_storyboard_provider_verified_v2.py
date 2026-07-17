@@ -110,6 +110,8 @@ def test_studio_requests_v2_and_only_legacy_mode_keeps_local_fallback() -> None:
     assert "Runtime 不可用，严格分镜流程未执行" in source
     assert 'node.params.generationBlockedReason = message' in source
     assert 'error.stage = parsed?.stage || ""' in runtime_client
+    assert 'parsed.reason ? `原因：${parsed.reason}` : ""' in runtime_client
+    assert "reason: cleanRuntimeErrorText(details.reason, 160)" in runtime_client
     assert 'state?.message || "先输入或导入剧本"' in prompt_bar
 
 

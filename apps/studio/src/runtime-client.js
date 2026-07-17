@@ -184,6 +184,7 @@ function runtimeErrorMessage(response, body, parsed = null) {
   if (parsed?.message || parsed?.error) {
     detail = [
       parsed.message,
+      parsed.reason ? `原因：${parsed.reason}` : "",
       parsed.field ? `字段：${parsed.field}` : "",
       parsed.user_action ? `建议：${parsed.user_action}` : "",
     ]
@@ -224,6 +225,7 @@ function parseRuntimeErrorPayload(response, body) {
       action: cleanRuntimeErrorText(detail.action, 80),
       stage: cleanRuntimeErrorText(detail.stage, 80),
       details,
+      reason: cleanRuntimeErrorText(details.reason, 160),
     };
   } catch {
     return { payload: null, message: cleanTextResponseError(body, response), error: "" };
