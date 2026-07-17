@@ -32,6 +32,20 @@ def validated_generation(payload: dict[str, Any], script_text: str) -> list[dict
     return shots
 
 
+def validated_generation_draft(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_shots = payload.get("shots")
+    if not isinstance(raw_shots, list) or not raw_shots:
+        raise StoryboardContractError("provider response must contain non-empty shots")
+    if len(raw_shots) > 80:
+        raise StoryboardContractError("provider response exceeds shot limit")
+    shots = [_validated_draft_shot(item, index + 1) for index, item in enumerate(raw_shots)]
+    if len({shot["shot_id"] for shot in shots}) != len(shots):
+        raise StoryboardContractError("storyboard contains duplicate shot ids")
+    if [shot["index"] for shot in shots] != list(range(1, len(shots) + 1)):
+        raise StoryboardContractError("storyboard shot indexes must be contiguous")
+    return shots
+
+
 def validated_verifier_result(
     payload: dict[str, Any],
     original_shot: dict[str, Any],
@@ -138,12 +152,59 @@ def validated_resolution(
     return entities, review_items
 
 
+def _validated_draft_shot(raw: Any, fallback_index: int) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise StoryboardContractError("shot must be an object")
+    try:
+        index = int(raw.get("index") or fallback_index)
+    except (TypeError, ValueError) as exc:
+        raise StoryboardContractError("shot index must be an integer") from exc
+    if index < 1:
+        raise StoryboardContractError("shot index must be positive")
+    shot_id = str(raw.get("shot_id") or f"shot_{index:02d}").strip()[:80]
+    source_evidence = raw.get("source_evidence", [])
+    asset_mentions = raw.get("asset_mentions", [])
+    if not isinstance(source_evidence, list):
+        raise StoryboardContractError("shot source evidence must be a list", details={"shot_id": shot_id})
+    if not isinstance(asset_mentions, list):
+        raise StoryboardContractError("shot asset mentions must be a list", details={"shot_id": shot_id})
+    if any(not isinstance(item, dict) for item in [*source_evidence, *asset_mentions]):
+        raise StoryboardContractError("shot evidence and asset mentions must be objects", details={"shot_id": shot_id})
+    description = str(raw.get("description") or "").strip()
+    has_evidence_quote = any(str(item.get("quote") or item.get("text") or "").strip() for item in source_evidence)
+    if not description and not has_evidence_quote:
+        missing_fields = ["description", "source_evidence"]
+        raise StoryboardContractError(
+            "shot draft lacks a narrative anchor",
+            details={
+                "shot_id": shot_id,
+                "missing_fields": missing_fields,
+                "fields": [{"field": name} for name in missing_fields],
+            },
+        )
+    return {
+        "shot_id": shot_id,
+        "index": index,
+        "duration": str(raw.get("duration") or "").strip(),
+        "description": description,
+        "shot_size": str(raw.get("shot_size") or "").strip(),
+        "light_atmosphere": str(raw.get("light_atmosphere") or "").strip(),
+        "camera_motion": str(raw.get("camera_motion") or "").strip(),
+        "dialogue": str(raw.get("dialogue") or "").strip() or "无明确对白",
+        "sound": str(raw.get("sound") or "").strip() or "无明确音效",
+        "source_evidence": source_evidence,
+        "asset_mentions": asset_mentions,
+        "unsupported_additions": raw.get("unsupported_additions", []),
+    }
+
+
 __all__ = (
     "ASSET_TYPES",
     "StoryboardContractError",
     "json_object_from_provider_text",
     "validate_storyboard_set",
     "validated_generation",
+    "validated_generation_draft",
     "validated_resolution",
     "validated_verifier_result",
 )

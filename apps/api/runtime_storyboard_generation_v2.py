@@ -10,7 +10,7 @@ from apps.api.runtime_models import StoryboardBreakdownRequest
 from apps.api.runtime_storyboard_contract_v2 import (
     StoryboardContractError,
     validate_storyboard_set,
-    validated_generation,
+    validated_generation_draft,
     validated_resolution,
     validated_verifier_result,
 )
@@ -25,7 +25,6 @@ from apps.api.runtime_storyboard_provider_session_v2 import (
 )
 from apps.api.runtime_storyboard_verification_prompt import (
     entity_resolution_prompt,
-    generation_repair_prompt,
     generation_prompt,
     shot_repair_prompt,
     shot_verification_prompt,
@@ -70,13 +69,9 @@ def build_provider_verified_storyboard_v2(
     try:
         generation_text = session.call(prompt, stage="generation", timeout_sec=90.0)
         generation_payload = json_object_from_provider_text(generation_text)
-    except StoryboardJsonError as exc:
+        generated_shots = validated_generation_draft(generation_payload)
+    except (StoryboardContractError, StoryboardJsonError) as exc:
         raise _contract_pipeline_error("provider_output_invalid", "generation_contract", exc) from exc
-    generated_shots, generation_repair_attempted = _validated_generation_with_repair(
-        session,
-        request.script_text,
-        generation_payload,
-    )
     if session.call_count + len(generated_shots) + 1 > session.max_calls:
         raise _pipeline_error(
             "provider_output_invalid",
@@ -161,7 +156,6 @@ def build_provider_verified_storyboard_v2(
             "accepted_count": sum(item["status"] == "accepted" for item in verification_records),
             "corrected_count": sum(item["status"] == "corrected" for item in verification_records),
             "repair_count": sum(bool(item["repair_attempted"]) for item in verification_records),
-            "generation_repair_count": int(generation_repair_attempted),
             "entity_count": len(entities),
             "unresolved_count": 0,
             "semantic_fallback_used": False,
@@ -169,40 +163,6 @@ def build_provider_verified_storyboard_v2(
             "idempotency_key": _idempotency_key(request),
         },
     }
-
-
-def _validated_generation_with_repair(
-    session: ProviderCallSession,
-    script_text: str,
-    generation_payload: dict[str, Any],
-) -> tuple[list[dict[str, Any]], bool]:
-    try:
-        return validated_generation(generation_payload, script_text), False
-    except StoryboardContractError as initial_error:
-        try:
-            repair_text = session.call(
-                generation_repair_prompt(
-                    script_text=script_text,
-                    generation_payload=generation_payload,
-                    reason=initial_error.reason,
-                    details=initial_error.details,
-                ),
-                stage="generation_repair",
-                timeout_sec=90.0,
-            )
-            repaired_payload = json_object_from_provider_text(repair_text)
-            return validated_generation(repaired_payload, script_text), True
-        except (StoryboardContractError, StoryboardJsonError) as repair_error:
-            details = {
-                "initial_reason": initial_error.reason,
-                **dict(getattr(repair_error, "details", {}) or {}),
-            }
-            wrapped = StoryboardContractError(str(getattr(repair_error, "reason", repair_error)), details=details)
-            raise _contract_pipeline_error(
-                "provider_output_invalid",
-                "generation_repair_contract",
-                wrapped,
-            ) from repair_error
 
 
 def _review_shot(

@@ -64,35 +64,6 @@ def shot_verification_prompt(*, script_text: str, shot: dict[str, Any]) -> str:
     )
 
 
-def generation_repair_prompt(
-    *,
-    script_text: str,
-    generation_payload: dict[str, Any],
-    reason: str,
-    details: dict[str, Any],
-) -> str:
-    return "\n".join(
-        [
-            "你是整组分镜合同修复器。只输出一个 JSON 对象，不要 Markdown、解释或前后缀。",
-            "上一次分镜生成结果没有通过机械合同。请对照完整剧本修复整组 JSON，不要把错误文本原样返回。",
-            "保留叙事覆盖与镜头原子性；不得通过删除关键镜头、合并无关动作或创造新内容来规避校验。",
-            "所有显示字段必须非空；没有对白写‘无明确对白’，没有可确认音效写‘无明确音效’。",
-            "每条 source_evidence.quote 和资产 evidence.quote 必须逐字复制剧本中的连续原文，并且是 script_text 的直接子串；禁止概括、改写、翻译、补字或使用画面描述代替原文。",
-            "start/end 必须对应 Python 字符索引和开区间；无法可靠计算时仍需提供唯一的逐字 quote，系统会校正唯一匹配的偏移。",
-            "每个 asset_mentions.label 必须逐字出现在自己的 evidence.quote 中；按 character/scene/prop 语义分类，不使用固定名称词表。",
-            "shot_id 不得重复，index 必须从 1 连续递增；不同镜头不得复用同一 source_evidence，也不得打乱剧本叙事顺序。",
-            "unsupported_additions 只记录画面描述里确实无法由剧本支持的新增内容；修复时优先删除无依据新增，使其正常为空数组。",
-            "严格保持输入的 {\"shots\":[...]} 结构，并输出修复后的完整镜头对象。",
-            "首次失败原因：",
-            json.dumps({"reason": reason, "details": details}, ensure_ascii=False, separators=(",", ":")),
-            "完整剧本：",
-            script_text,
-            "待修复生成结果：",
-            json.dumps(generation_payload, ensure_ascii=False, separators=(",", ":")),
-        ]
-    )
-
-
 def shot_repair_prompt(*, script_text: str, shot: dict[str, Any], reason_codes: list[str]) -> str:
     return "\n".join(
         [
@@ -150,7 +121,6 @@ def entity_resolution_prompt(*, script_text: str, shots: list[dict[str, Any]]) -
 __all__ = (
     "entity_resolution_prompt",
     "generation_prompt",
-    "generation_repair_prompt",
     "shot_repair_prompt",
     "shot_verification_prompt",
 )
