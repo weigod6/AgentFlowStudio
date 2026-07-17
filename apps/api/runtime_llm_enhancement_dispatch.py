@@ -17,6 +17,8 @@ def dispatch_llm_with_fallback(
     for service_id in provider_candidates(request, registry):
         try:
             return registry.dispatch("llm", service_id, dispatch_request)
+        except TimeoutError as exc:
+            raise ModelGatewayError("Provider request timed out") from exc
         except ModelGatewayError as exc:
             message = str(exc)
             if "Provider service not found" in message or "OpenAI-compatible HTTP error 404" in message:

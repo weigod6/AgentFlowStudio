@@ -325,6 +325,12 @@ def test_v2_invalid_output_provider_failure_and_manual_review_fail_closed(tmp_pa
             503,
             "provider_unavailable",
         ),
+        (
+            "read_timeout",
+            {"storyboard_generation": TimeoutError("The read operation timed out")},
+            503,
+            "provider_unavailable",
+        ),
     ]
     for suffix, responses, status_code, error_code in cases:
         registry = SequenceRegistry(responses)
@@ -333,6 +339,11 @@ def test_v2_invalid_output_provider_failure_and_manual_review_fail_closed(tmp_pa
         assert response.status_code == status_code
         assert response.json()["detail"]["error"] == error_code
         assert "shots" not in response.json()
+        if suffix == "read_timeout":
+            detail = response.json()["detail"]
+            assert detail["stage"] == "generation"
+            assert detail["retryable"] is True
+            assert "read operation" not in detail["message"].lower()
         if suffix == "partial":
             details = response.json()["detail"]["details"]
             assert "description" in details["missing_fields"]
