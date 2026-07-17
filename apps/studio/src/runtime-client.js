@@ -117,6 +117,8 @@ async function requestJson(route, { method = "GET", payload = null, meta = null,
     error.route = route;
     error.payload = parsed?.payload || null;
     error.errorCode = parsed?.error || "";
+    error.stage = parsed?.stage || "";
+    error.details = parsed?.details || null;
     error.requestId = parsed?.request_id || response.headers.get("X-Request-ID") || "";
     error.clientRequestId = parsed?.client_request_id || response.headers.get("X-Client-Request-ID") || requestMeta.client_request_id;
     dispatchAuthBoundaryRequired(error, route);

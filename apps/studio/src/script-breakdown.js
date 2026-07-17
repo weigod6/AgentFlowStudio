@@ -507,7 +507,13 @@ function setStoryboardBreakdownState(store, nodeId, status, message = "") {
       updated_at: new Date().toISOString(),
     };
     if (status === "running") node.status = "generating";
-    if (status === "error") node.status = "error";
+    if (status === "error") {
+      node.status = "error";
+      node.result = message;
+      node.params.generationPolicyStatus = "failed";
+      node.params.generationBlockedReason = message;
+      node.params.generationNextAction = "检查分镜管线状态和缺失字段后重新拆分。";
+    }
   }, { history: false, persist: false });
 }
 
@@ -527,7 +533,11 @@ function setScriptImportError(store, nodeId, message) {
 
 function safeBreakdownError(error) {
   const message = error instanceof Error ? error.message : String(error || "");
-  return message.replace(/Bearer\s+\S+/gi, "Bearer <redacted>").slice(0, 120);
+  const code = String(error?.errorCode || "").replace(/[^a-z0-9_.-]+/gi, "").slice(0, 60);
+  const stage = String(error?.stage || "").replace(/[^a-z0-9_.-]+/gi, "").slice(0, 60);
+  const prefix = [code, stage].filter(Boolean).join(" / ");
+  const clean = message.replace(/Bearer\s+\S+/gi, "Bearer <redacted>").slice(0, 160);
+  return prefix ? `${prefix}：${clean}` : clean;
 }
 
 function cleanSegment(value) {

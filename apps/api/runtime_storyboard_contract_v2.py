@@ -5,7 +5,6 @@ from typing import Any
 
 from apps.api.runtime_storyboard_json_v2 import json_object_from_provider_text
 
-
 ASSET_TYPES = {"character", "scene", "prop"}
 CHARACTER_SUBTYPES = {"human", "animal", "robot", "other"}
 VERIFICATION_STATUSES = {"accepted", "corrected", "rejected", "requires_review"}
@@ -136,10 +135,20 @@ def _validated_shot(raw: Any, script_text: str, fallback_index: int) -> dict[str
         raise StoryboardContractError("shot must be an object")
     index = _positive_int(raw.get("index"), fallback_index)
     shot_id = str(raw.get("shot_id") or f"shot_{index:02d}").strip()[:80]
-    required_fields = ("duration", "description", "shot_size", "light_atmosphere", "camera_motion", "dialogue", "sound")
+    required_fields = ("duration", "description", "shot_size", "light_atmosphere", "camera_motion")
     fields = {name: str(raw.get(name) or "").strip() for name in required_fields}
-    if any(not value for value in fields.values()):
-        raise StoryboardContractError("shot is missing a required display field", details={"shot_id": shot_id})
+    missing_fields = [name for name, value in fields.items() if not value]
+    if missing_fields:
+        raise StoryboardContractError(
+            "shot is missing a required display field",
+            details={
+                "shot_id": shot_id,
+                "missing_fields": missing_fields,
+                "fields": [{"field": name} for name in missing_fields],
+            },
+        )
+    fields["dialogue"] = str(raw.get("dialogue") or "").strip() or "无明确对白"
+    fields["sound"] = str(raw.get("sound") or "").strip() or "无明确音效"
     evidence_items = raw.get("source_evidence")
     if not isinstance(evidence_items, list) or not evidence_items:
         raise StoryboardContractError("shot is missing source evidence", details={"shot_id": shot_id})

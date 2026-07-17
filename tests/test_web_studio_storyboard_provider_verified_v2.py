@@ -100,12 +100,17 @@ process.stdout.write(JSON.stringify({ first: first.card_id, second: second.card_
 
 def test_studio_requests_v2_and_only_legacy_mode_keeps_local_fallback() -> None:
     source = (ROOT / "apps" / "studio" / "src" / "script-breakdown.js").read_text(encoding="utf-8")
+    runtime_client = (ROOT / "apps" / "studio" / "src" / "runtime-client.js").read_text(encoding="utf-8")
+    prompt_bar = (ROOT / "apps" / "studio" / "src" / "prompt-bar.js").read_text(encoding="utf-8")
 
     assert 'const VERIFIED_STORYBOARD_PIPELINE = "provider_verified_v2"' in source
     assert "storyboard_pipeline: requestedPipeline" in source
     assert 'requestedPipeline !== "legacy_storyboard_v1"' in source
     assert 'return { shots: [], mode: "provider_verified_v2_failed"' in source
     assert "Runtime 不可用，严格分镜流程未执行" in source
+    assert 'node.params.generationBlockedReason = message' in source
+    assert 'error.stage = parsed?.stage || ""' in runtime_client
+    assert 'state?.message || "先输入或导入剧本"' in prompt_bar
 
 
 def _run_node(script: str) -> dict:

@@ -11,7 +11,7 @@ from agentflow_studio.model_gateway.errors import ModelGatewayError
 from apps.api.runtime_asset_graph import build_asset_graph
 from apps.api.runtime_models import StoryboardBreakdownRequest
 from apps.api.runtime_service import create_runtime_app
-from apps.api.runtime_storyboard_contract_v2 import validated_generation, validated_resolution
+from apps.api.runtime_storyboard_contract_v2 import StoryboardContractError, validated_generation, validated_resolution
 from apps.api.runtime_storyboard_generation_v2 import ProviderCallSession
 from apps.api.runtime_storyboard_knowledge import storyboard_llm_request
 
@@ -158,6 +158,27 @@ def test_v2_empty_authoritative_assets_remain_empty(tmp_path, monkeypatch) -> No
     assert len(registry.calls) == 2
 
 
+def test_v2_normalizes_empty_optional_display_fields_but_rejects_missing_core_fields() -> None:
+    script = "旅人停在车站门口。"
+    shot = _shot(script, 1, script, script, [("character", "旅人"), ("scene", "车站")])
+    shot["dialogue"] = ""
+    shot["sound"] = None
+
+    normalized = validated_generation({"shots": [shot]}, script)[0]
+
+    assert normalized["dialogue"] == "无明确对白"
+    assert normalized["sound"] == "无明确音效"
+
+    shot["camera_motion"] = ""
+    try:
+        validated_generation({"shots": [shot]}, script)
+    except StoryboardContractError as exc:
+        assert exc.details["missing_fields"] == ["camera_motion"]
+        assert exc.details["fields"] == [{"field": "camera_motion"}]
+    else:
+        raise AssertionError("missing core storyboard field must fail closed")
+
+
 def test_v2_verifier_correction_replaces_generator_asset_errors(tmp_path, monkeypatch) -> None:
     script = "她伸出手指，把旧钥匙放在桌面。"
     generated = _shot(
@@ -222,6 +243,10 @@ def test_v2_invalid_output_provider_failure_and_manual_review_fail_closed(tmp_pa
         assert response.status_code == status_code
         assert response.json()["detail"]["error"] == error_code
         assert "shots" not in response.json()
+        if suffix == "partial":
+            details = response.json()["detail"]["details"]
+            assert "description" in details["missing_fields"]
+            assert details["fields"][0]["field"] == "description"
 
     script = "一名旅人走进车站。"
     generation = {"shots": [_shot(script, 1, script, script, [("character", "旅人"), ("scene", "车站")])]}
